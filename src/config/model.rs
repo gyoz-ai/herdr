@@ -106,6 +106,15 @@ impl AgentPanelSortConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentPanelScopeConfig {
+    #[default]
+    #[serde(alias = "current")]
+    Space,
+    All,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HostCursorModeConfig {
@@ -816,6 +825,7 @@ pub struct UiConfig {
     pub agent_panel_sort: AgentPanelSortConfig,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
+    pub agent_panel_scope: AgentPanelScopeConfig,
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
@@ -1012,6 +1022,7 @@ impl Default for UiConfig {
             hide_tab_bar_when_single_tab: false,
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),
+            agent_panel_scope: AgentPanelScopeConfig::Space,
             accent: "cyan".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
@@ -1232,6 +1243,30 @@ agent_panel_scope = "current"
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
+        assert_eq!(config.ui.agent_panel_scope, AgentPanelScopeConfig::Space);
+    }
+
+    #[test]
+    fn agent_panel_scope_config_parses_values_and_defaults() {
+        let default_config = Config::default();
+        assert_eq!(
+            default_config.ui.agent_panel_scope,
+            AgentPanelScopeConfig::Space
+        );
+
+        let toml = r#"
+[ui]
+agent_panel_scope = "all"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.agent_panel_scope, AgentPanelScopeConfig::All);
+
+        let toml = r#"
+[ui]
+agent_panel_scope = "space"
+"#;
+        let config: Config = toml::from_str(toml).unwrap();
+        assert_eq!(config.ui.agent_panel_scope, AgentPanelScopeConfig::Space);
     }
 
     #[test]

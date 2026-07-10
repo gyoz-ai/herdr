@@ -1111,6 +1111,9 @@ impl AppState {
     pub fn switch_workspace(&mut self, idx: usize) {
         if idx < self.workspaces.len() {
             let previous_focus = self.current_pane_focus_target();
+            if self.active != Some(idx) {
+                self.agent_panel_scroll = 0;
+            }
             self.active = Some(idx);
             self.selected = idx;
             let workspace_id = self.workspaces[idx].id.clone();
@@ -1149,6 +1152,7 @@ impl AppState {
         self.selected = ws_idx;
         let workspace_id = self.workspaces[ws_idx].id.clone();
         if workspace_changed {
+            self.agent_panel_scroll = 0;
             crate::logging::workspace_focused(&workspace_id);
         }
         self.mark_session_dirty();
@@ -3263,6 +3267,7 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::detect::{Agent, AgentState};
+    use crate::app::state::AgentPanelScope;
     use crate::workspace::Workspace;
     use ratatui::layout::Direction;
 
@@ -4044,6 +4049,7 @@ mod tests {
         state.active = Some(0);
         state.selected = 0;
         state.mode = Mode::Terminal;
+        state.agent_panel_scope = AgentPanelScope::All;
         mark_agent(&mut state, 0, 0, first_root);
         mark_agent(&mut state, 0, 0, first_second);
         mark_agent(&mut state, 1, 0, second_root);
@@ -4076,6 +4082,7 @@ mod tests {
         state.active = Some(0);
         state.selected = 0;
         state.mode = Mode::Terminal;
+        state.agent_panel_scope = AgentPanelScope::All;
         mark_agent(&mut state, 0, 0, first_root);
         mark_agent(&mut state, 0, 0, first_second);
         mark_agent(&mut state, 1, 0, second_root);
@@ -4114,6 +4121,7 @@ mod tests {
         state.active = Some(0);
         state.selected = 0;
         state.mode = Mode::Terminal;
+        state.agent_panel_scope = AgentPanelScope::All;
         state.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
         set_agent_state(&mut state, 0, 0, first_root, AgentState::Idle);
         set_agent_state(&mut state, 0, 0, first_second, AgentState::Working);

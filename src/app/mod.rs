@@ -55,7 +55,7 @@ use ratatui::DefaultTerminal;
 use tokio::sync::{mpsc, Notify};
 use tracing::info;
 
-use crate::config::Config;
+use crate::config::{AgentPanelScopeConfig, Config};
 use crate::events::AppEvent;
 
 pub use state::{AppState, Mode, ToastKind, ViewState};
@@ -248,6 +248,13 @@ fn agent_panel_sort_from_config(
     match sort {
         crate::config::AgentPanelSortConfig::Spaces => state::AgentPanelSort::Spaces,
         crate::config::AgentPanelSortConfig::Priority => state::AgentPanelSort::Priority,
+    }
+}
+
+fn agent_panel_scope_from_config(scope: AgentPanelScopeConfig) -> state::AgentPanelScope {
+    match scope {
+        AgentPanelScopeConfig::Space => state::AgentPanelScope::Space,
+        AgentPanelScopeConfig::All => state::AgentPanelScope::All,
     }
 }
 
@@ -471,6 +478,7 @@ impl App {
         };
 
         let agent_panel_sort = agent_panel_sort_from_config(config.ui.agent_panel_sort);
+        let agent_panel_scope = agent_panel_scope_from_config(config.ui.agent_panel_scope);
 
         // Validate sidebar bounds before they reach any `u16::clamp(min, max)`
         // call: `clamp` panics when `min > max`. On bad config, fall back to
@@ -628,6 +636,7 @@ impl App {
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
+            agent_panel_scope,
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
             copy_on_select: config.ui.copy_on_select,
@@ -1453,6 +1462,8 @@ impl App {
                     agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
+                self.state.agent_panel_scope =
+                    agent_panel_scope_from_config(config.ui.agent_panel_scope);
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {

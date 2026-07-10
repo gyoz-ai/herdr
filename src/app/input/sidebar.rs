@@ -477,7 +477,7 @@ mod tests {
 
     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
     use crate::{
-        app::state::{AgentPanelSort, DragTarget, Mode},
+        app::state::{AgentPanelScope, AgentPanelSort, DragTarget, Mode},
         config::SidebarCollapsedModeConfig,
         detect::{Agent, AgentState},
         workspace::Workspace,
@@ -844,6 +844,7 @@ mod tests {
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
+        app.state.agent_panel_scope = AgentPanelScope::All;
 
         let (_, detail_area) = crate::ui::expanded_sidebar_sections(
             app.state.view.sidebar_rect,
@@ -1054,6 +1055,7 @@ mod tests {
         app.state.mode = Mode::Terminal;
         app.state.sidebar_collapsed = true;
         app.state.agent_panel_sort = AgentPanelSort::Priority;
+        app.state.agent_panel_scope = AgentPanelScope::All;
         app.state.view.sidebar_rect = Rect::new(0, 0, 4, 20);
         app.state.view.terminal_area = Rect::new(4, 0, 80, 20);
 

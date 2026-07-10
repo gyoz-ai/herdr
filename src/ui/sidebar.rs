@@ -12,7 +12,7 @@ use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{agent_icon, state_dot, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
-use crate::app::state::{AgentPanelSort, Palette};
+use crate::app::state::{AgentPanelScope, AgentPanelSort, Palette};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
@@ -146,9 +146,22 @@ fn collect_agent_panel_entries_with_runtimes(
         }
     };
 
+    let scope_filter = match app.agent_panel_scope {
+        AgentPanelScope::All => None,
+        AgentPanelScope::Space => app
+            .active
+            .and_then(|ws_idx| app.workspaces.get(ws_idx))
+            .map(|ws| ws.worktree_space().map(|space| space.key.as_str())),
+    };
+
     app.workspaces
         .iter()
         .enumerate()
+        .filter(|(ws_idx, ws)| match &scope_filter {
+            None => true,
+            Some(None) => app.active == Some(*ws_idx),
+            Some(Some(key)) => ws.worktree_space().is_some_and(|space| space.key == *key),
+        })
         .flat_map(|(ws_idx, ws)| {
             let multi_tab = ws.tabs.len() > 1;
             let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
@@ -1475,7 +1488,9 @@ fn render_sidebar_toggle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::WorktreeSpaceMembership;
     use crate::{detect::Agent, workspace::Workspace};
+    use std::path::PathBuf;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn row_text(buffer: &ratatui::buffer::Buffer, row: u16, width: u16) -> String {
@@ -1961,6 +1976,82 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+    fn space_scope_limits_agent_panel_entries_to_active_space() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut first = Workspace::test_new("one");
+        let mut second = Workspace::test_new("two");
+        let mut third = Workspace::test_new("three");
+        first.worktree_space = Some(WorktreeSpaceMembership {
+            key: "alpha".into(),
+            label: "alpha".into(),
+            repo_root: PathBuf::from("/alpha"),
+            checkout_path: PathBuf::from("/alpha"),
+            is_linked_worktree: false,
+        });
+        second.worktree_space = Some(WorktreeSpaceMembership {
+            key: "alpha".into(),
+            label: "alpha".into(),
+            repo_root: PathBuf::from("/alpha"),
+            checkout_path: PathBuf::from("/alpha/wt"),
+            is_linked_worktree: true,
+        });
+        third.worktree_space = Some(WorktreeSpaceMembership {
+            key: "beta".into(),
+            label: "beta".into(),
+            repo_root: PathBuf::from("/beta"),
+            checkout_path: PathBuf::from("/beta"),
+            is_linked_worktree: false,
+        });
+
+        app.workspaces = vec![first, second, third];
+        app.ensure_test_terminals();
+        for ws_idx in 0..3 {
+            let pane = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Claude);
+        }
+        app.active = Some(0);
+        app.selected = 0;
+
+        let labels: Vec<String> = agent_panel_entries(&app)
+            .into_iter()
+            .map(|entry| entry.primary_label)
+            .collect();
+        assert_eq!(labels, ["one", "two"]);
+
+        app.active = Some(2);
+        let labels: Vec<String> = agent_panel_entries(&app)
+            .into_iter()
+            .map(|entry| entry.primary_label)
+            .collect();
+        assert_eq!(labels, ["three"]);
+    }
+
+    #[test]
+    fn space_scope_shows_only_active_workspace_when_it_has_no_space() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
+        app.ensure_test_terminals();
+        for ws_idx in 0..2 {
+            let pane = app.workspaces[ws_idx].tabs[0].root_pane;
+            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Claude);
+        }
+        app.active = Some(1);
+        app.selected = 1;
+
+        let labels: Vec<String> = agent_panel_entries(&app)
+            .into_iter()
+            .map(|entry| entry.primary_label)
+            .collect();
+        assert_eq!(labels, ["two"]);
+    }
+
+    #[test]
     fn priority_agent_panel_sort_uses_attention_then_space_order() {
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![
@@ -1972,6 +2063,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         app.ensure_test_terminals();
         app.active = Some(0);
         app.selected = 0;
+        app.agent_panel_scope = AgentPanelScope::All;
         app.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
 
         let set_state = |app: &mut crate::app::state::AppState, ws_idx: usize, state| {
@@ -2008,6 +2100,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.ensure_test_terminals();
+
 
         for ws_idx in 0..app.workspaces.len() {
             let pane = app.workspaces[ws_idx].tabs[0].root_pane;
