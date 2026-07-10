@@ -7,6 +7,7 @@ use std::time::Instant;
 
 use crate::detect::{Agent, AgentState};
 use crate::layout::PaneId;
+use crate::terminal::SubagentEntryState;
 use crate::workspace::{GitStatusCacheEntry, WorkspaceGitStatus};
 
 #[derive(Debug)]
@@ -113,6 +114,12 @@ pub enum AppEvent {
         agent_label: String,
         known_agent: Option<Agent>,
         seq: Option<u64>,
+    },
+    SubagentsReported {
+        pane_id: PaneId,
+        source: String,
+        seq: u64,
+        subagents: Vec<SubagentEntryState>,
     },
     /// A new version is available through the active installation manager.
     UpdateReady {

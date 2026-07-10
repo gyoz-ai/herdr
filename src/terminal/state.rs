@@ -111,6 +111,21 @@ struct RecentAgentProcessExit {
     observed_at: Instant,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubagentEntryState {
+    pub id: String,
+    pub agent_label: String,
+    pub state: AgentState,
+    pub description: Option<String>,
+    pub index: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SubagentReport {
+    pub seq: u64,
+    pub entries: Vec<SubagentEntryState>,
+}
+
 /// Pure state for a server-owned terminal.
 ///
 /// During the migration this is still one-to-one with a pane-backed PTY, but
@@ -126,6 +141,7 @@ pub struct TerminalState {
     pub hook_authority: Option<HookAuthority>,
     pub agent_metadata: HashMap<String, AgentMetadata>,
     pub metadata_tokens: crate::metadata_tokens::MetadataTokens,
+    pub subagent_reports: HashMap<String, SubagentReport>,
     pub persisted_agent_session: Option<crate::agent_resume::PersistedAgentSession>,
     pub terminal_title: Option<String>,
     pub manual_label: Option<String>,
@@ -159,6 +175,7 @@ impl TerminalState {
             hook_authority: None,
             agent_metadata: HashMap::new(),
             metadata_tokens: crate::metadata_tokens::MetadataTokens::default(),
+            subagent_reports: HashMap::new(),
             persisted_agent_session: None,
             terminal_title: None,
             manual_label: None,
@@ -1604,6 +1621,37 @@ impl TerminalState {
         })
     }
 
+    pub fn set_subagents_report(
+        &mut self,
+        source: &str,
+        seq: u64,
+        entries: Vec<SubagentEntryState>,
+    ) -> bool {
+        if self
+            .subagent_reports
+            .get(source)
+            .is_some_and(|existing| seq <= existing.seq)
+        {
+            return false;
+        }
+        if entries.is_empty() {
+            return self.subagent_reports.remove(source).is_some();
+        }
+        self.subagent_reports
+            .insert(source.to_string(), SubagentReport { seq, entries });
+        true
+    }
+
+    #[cfg(test)]
+    pub fn release_agent(
+        &mut self,
+        source: &str,
+        agent_label: &str,
+        seq: Option<u64>,
+    ) -> Option<EffectiveStateChange> {
+        self.release_agent_with_mutation(source, agent_label, seq)
+            .and_then(|mutation| mutation.effective_state_change)
+    }
     pub fn release_agent_with_mutation(
         &mut self,
         source: &str,
@@ -1652,6 +1700,7 @@ impl TerminalState {
             self.clear_agent_name();
         }
         self.hook_authority = None;
+        self.subagent_reports.remove(source);
         if !preserve_foreign_persisted_session {
             self.persisted_agent_session = None;
         }
@@ -3992,6 +4041,102 @@ mod tests {
         assert_eq!(terminal.detected_agent, Some(Agent::OpenCode));
         assert_eq!(terminal.effective_agent_label(), Some("opencode"));
         assert_eq!(terminal.state, AgentState::Working);
+    }
+
+    #[test]
+    fn set_subagents_report_drops_stale_seq() {
+        let mut terminal = test_terminal();
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            10,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: Some("first".into()),
+                index: 0,
+            }],
+        ));
+
+        assert!(!terminal.set_subagents_report(
+            "custom:omp-subagents",
+            10,
+            vec![SubagentEntryState {
+                id: "b".into(),
+                agent_label: "task".into(),
+                state: AgentState::Idle,
+                description: None,
+                index: 1,
+            }],
+        ));
+        assert!(!terminal.set_subagents_report("custom:omp-subagents", 9, vec![]));
+
+        let report = &terminal.subagent_reports["custom:omp-subagents"];
+        assert_eq!(report.seq, 10);
+        assert_eq!(report.entries.len(), 1);
+        assert_eq!(report.entries[0].id, "a");
+        assert_eq!(report.entries[0].state, AgentState::Working);
+    }
+
+    #[test]
+    fn set_subagents_report_empty_entries_remove_source_key() {
+        let mut terminal = test_terminal();
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                index: 0,
+            }],
+        ));
+
+        assert!(terminal.set_subagents_report("custom:omp-subagents", 2, vec![]));
+
+        assert!(!terminal.subagent_reports.contains_key("custom:omp-subagents"));
+        assert!(!terminal.set_subagents_report("custom:omp-subagents", 3, vec![]));
+    }
+
+    #[test]
+    fn release_agent_clears_matching_subagent_source() {
+        let mut terminal = test_terminal();
+        terminal.set_detected_state(Some(Agent::Pi), AgentState::Working);
+        terminal.set_hook_authority(
+            "herdr:pi".into(),
+            "pi".into(),
+            AgentState::Working,
+            None,
+            None,
+        );
+        assert!(terminal.set_subagents_report(
+            "herdr:pi",
+            1,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                index: 0,
+            }],
+        ));
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![SubagentEntryState {
+                id: "b".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                index: 0,
+            }],
+        ));
+
+        terminal.release_agent("herdr:pi", "pi", None);
+
+        assert!(!terminal.subagent_reports.contains_key("herdr:pi"));
+        assert!(terminal.subagent_reports.contains_key("custom:omp-subagents"));
     }
 
     #[test]

@@ -8,12 +8,15 @@ use crate::api::schema::{
     PaneMoveParams, PaneMoveReason, PaneMoveResult, PaneNeighborParams, PaneNeighborResult,
     PaneProcessInfo, PaneProcessInfoParams, PaneProcessInfoProcess, PaneReadParams, PaneReadResult,
     PaneReleaseAgentParams, PaneRenameParams, PaneReportAgentParams, PaneReportAgentSessionParams,
-    PaneReportMetadataParams, PaneResizeParams, PaneResizeReason, PaneResizeResult,
-    PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams, PaneSplitParams, PaneSwapParams,
-    PaneSwapReason, PaneSwapResult, PaneTarget, PaneZoomMode, PaneZoomParams, PaneZoomReason,
-    PaneZoomResult, ResponseResult,
+    PaneReportMetadataParams, PaneReportSubagentsParams, PaneResizeParams, PaneResizeReason,
+    PaneResizeResult, PaneSendInputParams, PaneSendKeysParams, PaneSendTextParams, PaneSplitParams,
+    PaneSwapParams, PaneSwapReason, PaneSwapResult, PaneTarget, PaneZoomMode, PaneZoomParams,
+    PaneZoomReason, PaneZoomResult, ResponseResult, SubagentStatus,
 };
 use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
+use crate::detect::AgentState;
+use crate::events::AppEvent;
+use crate::terminal::SubagentEntryState;
 use crate::app::App;
 #[cfg(test)]
 use crate::app::Mode;
@@ -1473,6 +1476,52 @@ impl App {
         encode_success(id, ResponseResult::Ok {})
     }
 
+    pub(super) fn handle_pane_report_subagents(
+        &mut self,
+        id: String,
+        params: PaneReportSubagentsParams,
+    ) -> String {
+        let Some((_ws_idx, pane_id)) = self.parse_pane_id(&params.pane_id) else {
+            return pane_not_found(id, &params.pane_id);
+        };
+        let source = match normalize_metadata_source(params.source) {
+            Ok(source) => source,
+            Err(message) => return encode_error(id, "invalid_metadata_source", message),
+        };
+        if params.subagents.len() > 64 {
+            return encode_error(
+                id,
+                "invalid_subagents",
+                "subagents must contain 64 entries or fewer",
+            );
+        }
+        let mut subagents = Vec::with_capacity(params.subagents.len());
+        for entry in params.subagents {
+            let Some(agent_label) = normalize_reported_agent_label(&entry.agent) else {
+                return invalid_agent(id);
+            };
+            subagents.push(SubagentEntryState {
+                id: entry.id,
+                agent_label,
+                state: match entry.status {
+                    SubagentStatus::Working => AgentState::Working,
+                    SubagentStatus::Done => AgentState::Idle,
+                    SubagentStatus::Failed => AgentState::Blocked,
+                },
+                description: normalize_presentation_text(entry.description),
+                index: entry.index,
+            });
+        }
+        self.handle_internal_event(AppEvent::SubagentsReported {
+            pane_id,
+            source,
+            seq: params.seq,
+            subagents,
+        });
+
+        encode_success(id, ResponseResult::Ok {})
+    }
+
     pub(super) fn handle_pane_send_text(
         &mut self,
         id: String,
@@ -1876,9 +1925,10 @@ fn invalid_agent(id: String) -> String {
 mod tests {
     use super::*;
     use crate::{
-        api::schema::{ErrorResponse, SplitDirection, SuccessResponse},
+        api::schema::{ErrorResponse, SplitDirection, SubagentEntry, SuccessResponse},
         config::Config,
         detect::{Agent, AgentState},
+        terminal::state::SubagentReport,
         workspace::Workspace,
     };
 
@@ -4016,5 +4066,158 @@ mod tests {
 
             assert_eq!(metadata_error_code(&response), "invalid_metadata_ttl");
         }
+    }
+
+    fn subagents_params(
+        pane_id: String,
+        seq: u64,
+        subagents: Vec<SubagentEntry>,
+    ) -> PaneReportSubagentsParams {
+        PaneReportSubagentsParams {
+            pane_id,
+            source: "custom:omp-subagents".into(),
+            seq,
+            subagents,
+        }
+    }
+
+    fn stored_subagent_report(app: &App, pane_id: PaneId) -> Option<SubagentReport> {
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane_id]
+            .attached_terminal_id
+            .clone();
+        app.state.terminals[&terminal_id]
+            .subagent_reports
+            .get("custom:omp-subagents")
+            .cloned()
+    }
+
+    #[test]
+    fn pane_report_subagents_rejects_unknown_pane() {
+        let (mut app, _pane_id) = app_with_test_workspace();
+
+        let response =
+            app.handle_pane_report_subagents("req".into(), subagents_params("%99".into(), 1, vec![]));
+
+        assert_eq!(metadata_error_code(&response), "pane_not_found");
+    }
+
+    #[test]
+    fn pane_report_subagents_rejects_more_than_64_entries() {
+        let (mut app, pane_id) = app_with_test_workspace();
+        let subagents = (0..65)
+            .map(|index| SubagentEntry {
+                id: format!("agent-{index}"),
+                agent: "task".into(),
+                status: SubagentStatus::Working,
+                description: None,
+                index,
+            })
+            .collect();
+
+        let response =
+            app.handle_pane_report_subagents("req".into(), subagents_params(pane_id, 1, subagents));
+
+        assert_eq!(metadata_error_code(&response), "invalid_subagents");
+    }
+
+    #[test]
+    fn pane_report_subagents_rejects_empty_agent_label() {
+        let (mut app, pane_id) = app_with_test_workspace();
+        let subagents = vec![SubagentEntry {
+            id: "a".into(),
+            agent: "  ".into(),
+            status: SubagentStatus::Working,
+            description: None,
+            index: 0,
+        }];
+
+        let response =
+            app.handle_pane_report_subagents("req".into(), subagents_params(pane_id, 1, subagents));
+
+        assert_eq!(metadata_error_code(&response), "invalid_agent");
+    }
+
+    #[test]
+    fn pane_report_subagents_stores_entries_and_drops_stale_seq() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        let response = app.handle_pane_report_subagents(
+            "req".into(),
+            subagents_params(
+                public_pane_id.clone(),
+                10,
+                vec![SubagentEntry {
+                    id: "a".into(),
+                    agent: "explorer".into(),
+                    status: SubagentStatus::Done,
+                    description: Some("  mapping the codebase  ".into()),
+                    index: 3,
+                }],
+            ),
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+
+        let report = stored_subagent_report(&app, pane_id).unwrap();
+        assert_eq!(report.seq, 10);
+        assert_eq!(report.entries.len(), 1);
+        assert_eq!(report.entries[0].agent_label, "explorer");
+        assert_eq!(report.entries[0].state, crate::detect::AgentState::Idle);
+        assert_eq!(
+            report.entries[0].description.as_deref(),
+            Some("mapping the codebase")
+        );
+        assert_eq!(report.entries[0].index, 3);
+
+        let response = app.handle_pane_report_subagents(
+            "req2".into(),
+            subagents_params(
+                public_pane_id,
+                9,
+                vec![SubagentEntry {
+                    id: "b".into(),
+                    agent: "stale".into(),
+                    status: SubagentStatus::Failed,
+                    description: None,
+                    index: 0,
+                }],
+            ),
+        );
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+
+        let report = stored_subagent_report(&app, pane_id).unwrap();
+        assert_eq!(report.seq, 10);
+        assert_eq!(report.entries[0].id, "a");
+    }
+
+    #[test]
+    fn pane_report_subagents_empty_list_clears_source_key() {
+        let (mut app, public_pane_id) = app_with_test_workspace();
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+
+        app.handle_pane_report_subagents(
+            "req".into(),
+            subagents_params(
+                public_pane_id.clone(),
+                1,
+                vec![SubagentEntry {
+                    id: "a".into(),
+                    agent: "task".into(),
+                    status: SubagentStatus::Working,
+                    description: None,
+                    index: 0,
+                }],
+            ),
+        );
+        assert!(stored_subagent_report(&app, pane_id).is_some());
+
+        app.handle_pane_report_subagents(
+            "req2".into(),
+            subagents_params(public_pane_id, 2, vec![]),
+        );
+
+        assert!(stored_subagent_report(&app, pane_id).is_none());
     }
 }

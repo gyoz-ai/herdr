@@ -2807,6 +2807,19 @@ impl AppState {
                     .collect()
                 }
             }
+            AppEvent::SubagentsReported {
+                pane_id,
+                source,
+                seq,
+                subagents,
+            } => self
+                .update_terminal_state(pane_id, |terminal| {
+                    terminal
+                        .set_subagents_report(&source, seq, subagents)
+                        .then(TerminalStateMutation::default)
+                })
+                .into_iter()
+                .collect(),
             // Both intercepted before this dispatch — in App::handle_internal_event (monolithic)
             // or via HeadlessServer forwarding to the foreground client (server); never touch
             // AppState. Kept for AppEvent exhaustiveness.
