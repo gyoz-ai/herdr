@@ -96,12 +96,17 @@ fn spawn_server_with_path(
     api_socket_path: &Path,
     path_override: Option<&Path>,
 ) -> SpawnedHerdr {
-    fs::create_dir_all(config_home.join("herdr")).unwrap();
+    let app_dir = if cfg!(debug_assertions) {
+        "herdr-dev"
+    } else {
+        "herdr"
+    };
+    fs::create_dir_all(config_home.join(app_dir)).unwrap();
     fs::create_dir_all(runtime_dir).unwrap();
     register_runtime_dir(runtime_dir);
     fs::write(
-        config_home.join("herdr/config.toml"),
-        "onboarding = false\n",
+        config_home.join(app_dir).join("config.toml"),
+        "[ui]\nagent_panel_subagents = false\n",
     )
     .unwrap();
 

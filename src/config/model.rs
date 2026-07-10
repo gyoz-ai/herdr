@@ -826,6 +826,7 @@ pub struct UiConfig {
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
     pub agent_panel_scope: AgentPanelScopeConfig,
+    pub agent_panel_subagents: bool,
     /// Accent color for highlights, borders, and navigation UI.
     /// Accepts hex (#89b4fa), named colors (cyan, blue), or RGB (rgb(137,180,250)).
     pub accent: String,
@@ -1023,6 +1024,7 @@ impl Default for UiConfig {
             agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),
             agent_panel_scope: AgentPanelScopeConfig::Space,
+            agent_panel_subagents: false,
             accent: "cyan".into(),
             toast: ToastConfig::default(),
             sound: SoundConfig::default(),
@@ -1253,13 +1255,16 @@ agent_panel_scope = "current"
             default_config.ui.agent_panel_scope,
             AgentPanelScopeConfig::Space
         );
+        assert!(!default_config.ui.agent_panel_subagents);
 
         let toml = r#"
 [ui]
 agent_panel_scope = "all"
+agent_panel_subagents = false
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.agent_panel_scope, AgentPanelScopeConfig::All);
+        assert!(!config.ui.agent_panel_subagents);
 
         let toml = r#"
 [ui]

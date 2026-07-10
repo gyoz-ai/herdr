@@ -4059,6 +4059,7 @@ mod tests {
         let mut state = AppState::test_new();
         state.workspaces = vec![first, second];
         state.ensure_test_terminals();
+        state.agent_panel_subagents = false;
         state.active = Some(0);
         state.selected = 0;
         state.mode = Mode::Terminal;
@@ -4091,6 +4092,7 @@ mod tests {
         let second_root = second.tabs[0].root_pane;
 
         let mut state = AppState::test_new();
+        state.agent_panel_subagents = false;
         state.workspaces = vec![first, second];
         state.active = Some(0);
         state.selected = 0;
@@ -4110,6 +4112,7 @@ mod tests {
     #[test]
     fn focus_agent_entry_succeeds_for_already_focused_agent() {
         let mut state = app_with_workspaces(&["one"]);
+        state.agent_panel_subagents = false;
         let root = state.workspaces[0].tabs[0].root_pane;
         mark_agent(&mut state, 0, 0, root);
 
@@ -4131,6 +4134,7 @@ mod tests {
         let mut state = AppState::test_new();
         state.workspaces = vec![first, second];
         state.ensure_test_terminals();
+        state.agent_panel_subagents = false;
         state.active = Some(0);
         state.selected = 0;
         state.mode = Mode::Terminal;
@@ -4157,6 +4161,7 @@ mod tests {
         let mut state = AppState::test_new();
         state.workspaces = vec![workspace];
         state.ensure_test_terminals();
+        state.agent_panel_subagents = false;
         state.active = Some(0);
         state.selected = 0;
         state.mode = Mode::Terminal;
@@ -4183,6 +4188,7 @@ mod tests {
         let mut state = AppState::test_new();
         state.workspaces = vec![workspace];
         state.ensure_test_terminals();
+        state.agent_panel_subagents = false;
         state.active = Some(0);
         state.selected = 0;
         state.mode = Mode::Terminal;

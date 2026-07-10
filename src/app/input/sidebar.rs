@@ -656,6 +656,7 @@ mod tests {
         let second_pane = ws.tabs[first_tab].root_pane;
         app.state.workspaces = vec![ws];
         app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = false;
         let first_terminal_id = app.state.workspaces[0].tabs[0].panes[&first_pane]
             .attached_terminal_id
             .clone();
@@ -825,6 +826,7 @@ mod tests {
 
         app.state.workspaces = vec![first, second];
         app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = false;
         let first_terminal_id = app.state.workspaces[0].tabs[0].panes[&first_pane]
             .attached_terminal_id
             .clone();
@@ -884,6 +886,7 @@ mod tests {
 
         app.state.workspaces = vec![ws];
         app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = false;
         let first_terminal_id = app.state.workspaces[0].tabs[0].panes[&first_pane]
             .attached_terminal_id
             .clone();
@@ -937,6 +940,7 @@ mod tests {
 
         app.state.workspaces = vec![ws];
         app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = false;
         let first_terminal_id = app.state.workspaces[0].tabs[0].panes[&first_pane]
             .attached_terminal_id
             .clone();
@@ -1001,6 +1005,7 @@ mod tests {
         let second_pane = ws.tabs[second_tab].root_pane;
         app.state.workspaces = vec![ws];
         app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = false;
         let first_terminal_id = app.state.workspaces[0].tabs[0].panes[&first_pane]
             .attached_terminal_id
             .clone();
@@ -1050,6 +1055,7 @@ mod tests {
 
         app.state.workspaces = vec![first, second];
         app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = false;
         app.state.active = Some(0);
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;

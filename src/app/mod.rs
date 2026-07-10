@@ -637,6 +637,7 @@ impl App {
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             agent_panel_scope,
+            agent_panel_subagents: config.ui.agent_panel_subagents,
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
             copy_on_select: config.ui.copy_on_select,
@@ -1464,6 +1465,7 @@ impl App {
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scope =
                     agent_panel_scope_from_config(config.ui.agent_panel_scope);
+                self.state.agent_panel_subagents = config.ui.agent_panel_subagents;
                 self.state.agent_panel_scroll = 0;
                 self.state.accent = crate::config::parse_color(&config.ui.accent);
                 if !self.state.local_sound_playback && self.state.sound != config.ui.sound {

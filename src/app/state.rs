@@ -1503,6 +1503,7 @@ pub struct AppState {
     pub sidebar_agents: crate::config::AgentsSidebarConfig,
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     pub agent_panel_scope: AgentPanelScope,
+    pub agent_panel_subagents: bool,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -1882,6 +1883,7 @@ impl AppState {
             sidebar_agents: crate::config::AgentsSidebarConfig::default(),
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             agent_panel_scope: AgentPanelScope::Space,
+            agent_panel_subagents: false,
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,

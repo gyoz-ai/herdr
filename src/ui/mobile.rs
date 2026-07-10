@@ -1173,6 +1173,7 @@ mod tests {
             last_agent_state_change_seq: None,
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
+            subagent_index: None,
         }
     }
 
@@ -1298,6 +1299,7 @@ mod tests {
         workspace.test_add_tab(None); // two tabs -> two agent panes
         app.workspaces = vec![workspace];
         app.ensure_test_terminals();
+        app.agent_panel_subagents = false;
         for terminal in app.terminals.values_mut() {
             terminal.agent_name = Some("pi".to_string());
             terminal.state = AgentState::Working;

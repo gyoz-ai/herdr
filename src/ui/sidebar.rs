@@ -9,6 +9,7 @@ use ratatui::{
 };
 
 use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
+use std::collections::HashMap;
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{agent_icon, state_dot, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
@@ -37,6 +38,7 @@ pub(crate) struct AgentPanelEntry {
     pub last_agent_state_change_seq: Option<u64>,
     pub state_labels: std::collections::HashMap<String, String>,
     pub tokens: std::collections::HashMap<String, String>,
+    pub subagent_index: Option<u32>,
 }
 
 fn sidebar_section_heights(total_h: u16, split_ratio: f32) -> (u16, u16) {
@@ -154,46 +156,86 @@ fn collect_agent_panel_entries_with_runtimes(
             .map(|ws| ws.worktree_space().map(|space| space.key.as_str())),
     };
 
-    app.workspaces
-        .iter()
-        .enumerate()
-        .filter(|(ws_idx, ws)| match &scope_filter {
+    let mut entries: Vec<AgentPanelEntry> = Vec::new();
+    for (ws_idx, ws) in app.workspaces.iter().enumerate() {
+        let in_scope = match &scope_filter {
             None => true,
-            Some(None) => app.active == Some(*ws_idx),
+            Some(None) => app.active == Some(ws_idx),
             Some(Some(key)) => ws.worktree_space().is_some_and(|space| space.key == *key),
-        })
-        .flat_map(|(ws_idx, ws)| {
-            let multi_tab = ws.tabs.len() > 1;
-            let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
-            ws.pane_details(&app.terminals)
-                .into_iter()
-                .map(move |detail| {
-                    let show_tab = multi_tab
-                        || ws
-                            .tabs
-                            .get(detail.tab_idx)
-                            .is_some_and(|tab| !tab.is_auto_named());
-                    AgentPanelEntry {
-                        ws_idx,
-                        tab_idx: detail.tab_idx,
-                        pane_id: detail.pane_id,
-                        primary_label: workspace_label.clone(),
-                        primary_tab_label: show_tab.then_some(detail.tab_label),
-                        pane_label: detail.pane_label,
-                        terminal_title: detail.terminal_title,
-                        terminal_title_stripped: detail.terminal_title_stripped,
-                        agent_label: Some(detail.agent_label),
-                        agent_kind_label: detail.agent_kind_label,
-                        agent: detail.agent,
-                        state: detail.state,
-                        seen: detail.seen,
-                        last_agent_state_change_seq: detail.last_agent_state_change_seq,
-                        state_labels: detail.state_labels,
-                        tokens: detail.tokens,
+        };
+        if !in_scope {
+            continue;
+        }
+        let multi_tab = ws.tabs.len() > 1;
+        let workspace_label = ws.display_name_from(&app.terminals, terminal_runtimes);
+        for detail in ws.pane_details(&app.terminals) {
+            if app.agent_panel_subagents {
+                let Some(terminal) = ws
+                    .pane_state(detail.pane_id)
+                    .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
+                else {
+                    continue;
+                };
+                let mut sources: Vec<_> = terminal.subagent_reports.keys().collect();
+                sources.sort();
+                for source in sources {
+                    let mut subagents: Vec<_> =
+                        terminal.subagent_reports[source].entries.iter().collect();
+                    subagents.sort_by_key(|subagent| subagent.index);
+                    for subagent in subagents {
+                        entries.push(AgentPanelEntry {
+                            ws_idx,
+                            tab_idx: detail.tab_idx,
+                            pane_id: detail.pane_id,
+                            primary_label: subagent
+                                .description
+                                .clone()
+                                .unwrap_or_else(|| subagent.agent_label.clone()),
+                            primary_tab_label: None,
+                            pane_label: None,
+                            terminal_title: None,
+                            terminal_title_stripped: None,
+                            agent_label: Some(subagent.agent_label.clone()),
+                            agent_kind_label: None,
+                            agent: None,
+                            state: subagent.state,
+                            seen: true,
+                            last_agent_state_change_seq: detail.last_agent_state_change_seq,
+                            state_labels: HashMap::new(),
+                            tokens: HashMap::new(),
+                            subagent_index: Some(subagent.index),
+                        });
                     }
-                })
-        })
-        .collect()
+                }
+            } else {
+                let show_tab = multi_tab
+                    || ws
+                        .tabs
+                        .get(detail.tab_idx)
+                        .is_some_and(|tab| !tab.is_auto_named());
+                entries.push(AgentPanelEntry {
+                    ws_idx,
+                    tab_idx: detail.tab_idx,
+                    pane_id: detail.pane_id,
+                    primary_label: workspace_label.clone(),
+                    primary_tab_label: show_tab.then_some(detail.tab_label),
+                    pane_label: detail.pane_label,
+                    terminal_title: detail.terminal_title,
+                    terminal_title_stripped: detail.terminal_title_stripped,
+                    agent_label: Some(detail.agent_label),
+                    agent_kind_label: detail.agent_kind_label,
+                    agent: detail.agent,
+                    state: detail.state,
+                    seen: detail.seen,
+                    last_agent_state_change_seq: detail.last_agent_state_change_seq,
+                    state_labels: detail.state_labels,
+                    tokens: detail.tokens,
+                    subagent_index: None,
+                });
+            }
+        }
+    }
+    entries
 }
 
 pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static str {
@@ -1411,7 +1453,15 @@ fn render_agent_detail(
         let state_icon = agent_icon(detail.state, detail.seen, app.spinner_tick, p);
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
+            let indent = if detail.subagent_index.is_some() && row_index == 0 {
+                "\u{2514} "
+            } else {
+                ""
+            };
             let mut spans = vec![Span::raw(if row_index == 0 { " " } else { "   " })];
+            if !indent.is_empty() {
+                spans.push(Span::styled(indent, agent_style));
+            }
             spans.extend(resolved_token_spans(
                 resolved,
                 state_icon,
@@ -1421,7 +1471,8 @@ fn render_agent_detail(
                 agent_style,
                 p,
                 body.width
-                    .saturating_sub(if row_index == 0 { 1 } else { 3 }) as usize,
+                    .saturating_sub(if row_index == 0 { 1 } else { 3 })
+                    .saturating_sub(display_width_u16(indent)) as usize,
             ));
             frame.render_widget(
                 Paragraph::new(Line::from(spans)).style(row_style),
@@ -1488,9 +1539,11 @@ fn render_sidebar_toggle(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::SubagentEntryState;
     use crate::workspace::WorktreeSpaceMembership;
     use crate::{detect::Agent, workspace::Workspace};
     use std::path::PathBuf;
+    use ratatui::layout::Direction;
     use ratatui::{backend::TestBackend, Terminal};
 
     fn row_text(buffer: &ratatui::buffer::Buffer, row: u16, width: u16) -> String {
@@ -1976,6 +2029,98 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+    fn subagent_mode_emits_one_row_per_reported_subagent() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = Workspace::test_new("one");
+        let first_pane = workspace.tabs[0].root_pane;
+        let second_pane = workspace.test_split(Direction::Horizontal);
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_subagents = true;
+
+        for pane in [first_pane, second_pane] {
+            let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Pi);
+        }
+        let first_terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![
+                    SubagentEntryState {
+                        id: "b".into(),
+                        agent_label: "reviewer".into(),
+                        state: AgentState::Idle,
+                        description: None,
+                        index: 1,
+                    },
+                    SubagentEntryState {
+                        id: "a".into(),
+                        agent_label: "explorer".into(),
+                        state: AgentState::Working,
+                        description: Some("mapping code".into()),
+                        index: 0,
+                    },
+                ],
+            ));
+
+        let entries = agent_panel_entries(&app);
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].primary_label, "mapping code");
+        assert_eq!(entries[0].agent_label.as_deref(), Some("explorer"));
+        assert_eq!(entries[0].state, AgentState::Working);
+        assert_eq!(entries[0].subagent_index, Some(0));
+        assert_eq!(entries[0].pane_id, first_pane);
+        assert_eq!(entries[1].primary_label, "reviewer");
+        assert_eq!(entries[1].agent_label.as_deref(), Some("reviewer"));
+        assert_eq!(entries[1].state, AgentState::Idle);
+        assert_eq!(entries[1].subagent_index, Some(1));
+
+        app.agent_panel_subagents = false;
+        let entries = agent_panel_entries(&app);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().all(|entry| entry.subagent_index.is_none()));
+        assert_eq!(entries[0].primary_label, "one");
+    }
+
+    #[test]
+    fn subagent_mode_renders_empty_panel_without_panic() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let pane = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_subagents = true;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Pi);
+
+        assert!(agent_panel_entries(&app).is_empty());
+
+        let area = Rect::new(0, 0, 26, 20);
+        let runtimes = TerminalRuntimeRegistry::new();
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_agent_detail(&app, &runtimes, frame, area))
+            .expect("agent panel should render with no rows");
+    }
+
+    #[test]
     fn space_scope_limits_agent_panel_entries_to_active_space() {
         let mut app = crate::app::state::AppState::test_new();
         let mut first = Workspace::test_new("one");
@@ -2005,6 +2150,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         app.workspaces = vec![first, second, third];
         app.ensure_test_terminals();
+        app.agent_panel_subagents = false;
         for ws_idx in 0..3 {
             let pane = app.workspaces[ws_idx].tabs[0].root_pane;
             let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
@@ -2034,6 +2180,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.ensure_test_terminals();
+        app.agent_panel_subagents = false;
         for ws_idx in 0..2 {
             let pane = app.workspaces[ws_idx].tabs[0].root_pane;
             let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
@@ -2061,6 +2208,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
             Workspace::test_new("four"),
         ];
         app.ensure_test_terminals();
+        app.agent_panel_subagents = false;
         app.active = Some(0);
         app.selected = 0;
         app.agent_panel_scope = AgentPanelScope::All;
@@ -2100,6 +2248,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         let mut app = crate::app::state::AppState::test_new();
         app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.ensure_test_terminals();
+
 
 
         for ws_idx in 0..app.workspaces.len() {
@@ -2229,6 +2378,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         app.workspaces = vec![workspace];
         app.ensure_test_terminals();
+        app.agent_panel_subagents = false;
         let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
             .attached_terminal_id
             .clone();
@@ -2280,6 +2430,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
 
         app.workspaces = vec![workspace];
         app.ensure_test_terminals();
+        app.agent_panel_subagents = false;
         let first_terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
             .attached_terminal_id
             .clone();
@@ -2300,6 +2451,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+
     fn expanded_sidebar_sections_handle_tiny_heights() {
         let (ws_area, detail_area) = expanded_sidebar_sections(Rect::new(0, 0, 20, 5), 0.9);
 
