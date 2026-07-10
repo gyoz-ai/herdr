@@ -246,8 +246,11 @@ impl App {
                 }
             }
             NavigateAction::FocusAgent(idx) => {
-                if let Some((ws_idx, pane_id)) = self.agent_entry_target(idx) {
+                if let Some((ws_idx, pane_id, deep_focus)) = self.agent_entry_target(idx) {
                     self.focus_pane_internal_via_api(ws_idx, pane_id);
+                    if let Some(index) = deep_focus {
+                        self.send_subagent_deep_focus(ws_idx, pane_id, index);
+                    }
                     self.state.ensure_agent_panel_entry_visible(idx);
                     leave_navigate_mode(&mut self.state);
                 }
@@ -269,15 +272,21 @@ impl App {
                 }
             }
             NavigateAction::PreviousAgent => {
-                if let Some((idx, ws_idx, pane_id)) = self.relative_agent_entry(false) {
+                if let Some((idx, ws_idx, pane_id, deep_focus)) = self.relative_agent_entry(false) {
                     self.focus_pane_internal_via_api(ws_idx, pane_id);
+                    if let Some(index) = deep_focus {
+                        self.send_subagent_deep_focus(ws_idx, pane_id, index);
+                    }
                     self.state.ensure_agent_panel_entry_visible(idx);
                     leave_navigate_mode(&mut self.state);
                 }
             }
             NavigateAction::NextAgent => {
-                if let Some((idx, ws_idx, pane_id)) = self.relative_agent_entry(true) {
+                if let Some((idx, ws_idx, pane_id, deep_focus)) = self.relative_agent_entry(true) {
                     self.focus_pane_internal_via_api(ws_idx, pane_id);
+                    if let Some(index) = deep_focus {
+                        self.send_subagent_deep_focus(ws_idx, pane_id, index);
+                    }
                     self.state.ensure_agent_panel_entry_visible(idx);
                     leave_navigate_mode(&mut self.state);
                 }
@@ -706,13 +715,16 @@ impl App {
         Some((ws.active_tab as isize + delta).rem_euclid(ws.tabs.len() as isize) as usize)
     }
 
-    fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId)> {
+    fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId, Option<u32>)> {
         let entries = crate::ui::agent_panel_entries(&self.state);
         let target = entries.get(idx)?;
-        Some((target.ws_idx, target.pane_id))
+        Some((target.ws_idx, target.pane_id, target.subagent_index))
     }
 
-    fn relative_agent_entry(&self, forward: bool) -> Option<(usize, usize, crate::layout::PaneId)> {
+    fn relative_agent_entry(
+        &self,
+        forward: bool,
+    ) -> Option<(usize, usize, crate::layout::PaneId, Option<u32>)> {
         let entries = crate::ui::agent_panel_entries(&self.state);
         if entries.is_empty() {
             return None;
@@ -733,7 +745,7 @@ impl App {
             (None, false) => entries.len() - 1,
         };
         let target = entries.get(next_idx)?;
-        Some((next_idx, target.ws_idx, target.pane_id))
+        Some((next_idx, target.ws_idx, target.pane_id, target.subagent_index))
     }
 
     fn pass_through_key_to_focused_pane(&mut self, key: TerminalKey) -> bool {
@@ -1839,7 +1851,7 @@ mod tests {
     use std::time::Duration;
 
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use ratatui::layout::Direction;
+    use ratatui::layout::{Direction, Rect};
 
     #[cfg(unix)]
     use super::super::wait_for_file;
@@ -1848,6 +1860,9 @@ mod tests {
     use crate::{
         app::App, config::Config, input::TerminalKey, terminal::TerminalState, workspace::Workspace,
     };
+    use bytes::Bytes;
+    use crate::detect::{Agent, AgentState};
+    use crate::terminal::{SubagentEntryState, TerminalRuntime};
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
@@ -1873,6 +1888,49 @@ mod tests {
         app.state.active = (!app.state.workspaces.is_empty()).then_some(0);
         app.state.selected = 0;
         app
+    }
+
+    #[tokio::test]
+    async fn focus_agent_action_deep_focuses_subagent_row() {
+        let mut app = app_with_test_workspaces(&["one"]);
+        let pane = app.state.workspaces[0].tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        app.state.workspaces[0].tabs[0].runtimes.insert(pane, runtime);
+        app.state.agent_panel_subagents = true;
+        app.state.view.sidebar_rect = Rect::new(0, 0, 26, 20);
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Pi);
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![
+                SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    index: 0,
+                },
+                SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "reviewer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    index: 1,
+                },
+            ],
+        ));
+        app.state.mode = Mode::Navigate;
+
+        app.execute_tui_navigate_action(NavigateAction::FocusAgent(1), ActionContext::Navigate);
+
+        assert_eq!(app.state.mode, Mode::Terminal);
+        assert_eq!(app.state.workspaces[0].tabs[0].layout.focused(), pane);
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;2F"));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

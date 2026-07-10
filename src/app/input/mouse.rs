@@ -37,6 +37,7 @@ pub(super) enum MouseAction {
     FocusPane {
         ws_idx: usize,
         pane_id: crate::layout::PaneId,
+        deep_focus: Option<u32>,
     },
     FocusToastTarget,
     MoveWorkspace {
@@ -521,11 +522,15 @@ impl AppState {
                             return Some(MouseAction::FocusWorkspace { ws_idx: idx });
                         }
 
-                        if let Some((ws_idx, _tab_idx, pane_id)) =
+                        if let Some((ws_idx, _tab_idx, pane_id, deep_focus)) =
                             self.collapsed_agent_detail_target_at(mouse.row)
                         {
                             self.mode = Mode::Terminal;
-                            return Some(MouseAction::FocusPane { ws_idx, pane_id });
+                            return Some(MouseAction::FocusPane {
+                                ws_idx,
+                                pane_id,
+                                deep_focus,
+                            });
                         }
                         return None;
                     }
@@ -613,11 +618,15 @@ impl AppState {
                         return None;
                     }
 
-                    if let Some((ws_idx, _tab_idx, pane_id)) =
+                    if let Some((ws_idx, _tab_idx, pane_id, deep_focus)) =
                         self.agent_detail_target_at(mouse.row)
                     {
                         self.mode = Mode::Terminal;
-                        return Some(MouseAction::FocusPane { ws_idx, pane_id });
+                        return Some(MouseAction::FocusPane {
+                            ws_idx,
+                            pane_id,
+                            deep_focus,
+                        });
                     }
                 } else if let Some(info) = self.pane_at(mouse.column, mouse.row).cloned() {
                     if self.mode != Mode::Terminal {
@@ -1160,7 +1169,11 @@ impl AppState {
                 pane_id,
             }) => {
                 self.mode = Mode::Terminal;
-                return MobileMouseResult::Action(MouseAction::FocusPane { ws_idx, pane_id });
+                return MobileMouseResult::Action(MouseAction::FocusPane {
+                    ws_idx,
+                    pane_id,
+                    deep_focus: None,
+                });
             }
             Some(crate::ui::MobileSwitcherTarget::Menu(action_idx)) => {
                 let actions = global_menu_actions(self);
@@ -1405,7 +1418,11 @@ impl AppState {
             .get(ws_idx)
             .and_then(|workspace| workspace.focused_pane_id())
             != Some(pane_id))
-        .then_some(MouseAction::FocusPane { ws_idx, pane_id })
+        .then_some(MouseAction::FocusPane {
+            ws_idx,
+            pane_id,
+            deep_focus: None,
+        })
     }
 
     pub(crate) fn pane_info_by_id(&self, pane_id: crate::layout::PaneId) -> Option<&PaneInfo> {

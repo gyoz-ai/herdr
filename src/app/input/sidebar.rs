@@ -333,7 +333,7 @@ impl AppState {
     pub(super) fn collapsed_agent_detail_target_at(
         &self,
         row: u16,
-    ) -> Option<(usize, usize, crate::layout::PaneId)> {
+    ) -> Option<(usize, usize, crate::layout::PaneId, Option<u32>)> {
         if !self.sidebar_collapsed {
             return None;
         }
@@ -355,7 +355,12 @@ impl AppState {
         let detail_idx = (row - detail_content_area.y) as usize;
         let details = crate::ui::agent_panel_entries(self);
         let detail = details.get(detail_idx)?;
-        Some((detail.ws_idx, detail.tab_idx, detail.pane_id))
+        Some((
+            detail.ws_idx,
+            detail.tab_idx,
+            detail.pane_id,
+            detail.subagent_index,
+        ))
     }
 
     pub(super) fn workspace_drop_index_at_row(&self, row: u16) -> Option<usize> {
@@ -432,7 +437,7 @@ impl AppState {
     pub(super) fn agent_detail_target_at(
         &self,
         row: u16,
-    ) -> Option<(usize, usize, crate::layout::PaneId)> {
+    ) -> Option<(usize, usize, crate::layout::PaneId, Option<u32>)> {
         if self.sidebar_collapsed {
             return None;
         }
@@ -457,7 +462,12 @@ impl AppState {
                 break;
             }
             if row >= row_y && row < row_y.saturating_add(height) {
-                return Some((detail.ws_idx, detail.tab_idx, detail.pane_id));
+                return Some((
+                    detail.ws_idx,
+                    detail.tab_idx,
+                    detail.pane_id,
+                    detail.subagent_index,
+                ));
             }
             row_y = row_y
                 .saturating_add(height)
@@ -476,6 +486,9 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
+    use bytes::Bytes;
+    use crate::terminal::{SubagentEntryState, TerminalRuntime};
+    use crate::ui::{agent_panel_body_rect, agent_panel_scroll_metrics, should_show_scrollbar};
     use crate::{
         app::state::{AgentPanelScope, AgentPanelSort, DragTarget, Mode},
         config::SidebarCollapsedModeConfig,
@@ -693,6 +706,65 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn clicking_subagent_row_focuses_parent_pane_and_writes_deep_focus_sequence() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        ws.tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = true;
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Pi);
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![
+                SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    index: 0,
+                },
+                SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "reviewer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    index: 1,
+                },
+            ],
+        ));
+
+        let detail_area = app.state.agent_panel_rect();
+        let metrics = agent_panel_scroll_metrics(&app.state, detail_area);
+        let body = agent_panel_body_rect(detail_area, should_show_scrollbar(metrics));
+        let second_row = body.y + 3;
+        assert_eq!(
+            app.state.agent_detail_target_at(second_row),
+            Some((0, 0, pane, Some(1)))
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            second_row,
+        ));
+
+        assert_eq!(app.state.workspaces[0].tabs[0].layout.focused(), pane);
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;2F"));
+        assert!(rx.try_recv().is_err());
+    }
+
     #[test]
     fn per_agent_row_heights_preserve_card_gaps_and_trailing_mouse_targets() {
         let mut app = app_for_mouse_test();
@@ -732,18 +804,18 @@ mod tests {
 
         assert_eq!(
             app.state.agent_detail_target_at(body.y),
-            Some((0, 0, first_pane))
+            Some((0, 0, first_pane, None))
         );
         assert_eq!(app.state.agent_detail_target_at(body.y + 1), None);
         assert_eq!(
             app.state.agent_detail_target_at(body.y + 3),
-            Some((1, 0, second_pane))
+            Some((1, 0, second_pane, None))
         );
 
         app.state.sidebar_agents.row_gap = 0;
         assert_eq!(
             app.state.agent_detail_target_at(body.y + 1),
-            Some((1, 0, second_pane))
+            Some((1, 0, second_pane, None))
         );
     }
 
@@ -787,7 +859,7 @@ mod tests {
 
         assert_eq!(
             app.state.agent_detail_target_at(body.y),
-            Some((0, 0, first_pane))
+            Some((0, 0, first_pane, None))
         );
     }
 

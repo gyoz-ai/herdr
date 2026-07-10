@@ -6,6 +6,7 @@ use tracing::warn;
 
 use crate::app::PaneClickState;
 use crate::input::TerminalKey;
+use crate::layout::PaneId;
 #[cfg(test)]
 use ratatui::layout::Direction;
 
@@ -349,8 +350,15 @@ impl App {
                         self.focus_workspace_idx_via_api(ws_idx)
                     }
                     MouseAction::FocusTab { tab_idx } => self.focus_tab_idx_via_api(tab_idx),
-                    MouseAction::FocusPane { ws_idx, pane_id } => {
-                        self.focus_pane_internal_via_api(ws_idx, pane_id)
+                    MouseAction::FocusPane {
+                        ws_idx,
+                        pane_id,
+                        deep_focus,
+                    } => {
+                        self.focus_pane_internal_via_api(ws_idx, pane_id);
+                        if let Some(index) = deep_focus {
+                            self.send_subagent_deep_focus(ws_idx, pane_id, index);
+                        }
                     }
                     MouseAction::FocusToastTarget => self.focus_toast_target_via_api(),
                     MouseAction::MoveWorkspace {
@@ -492,6 +500,16 @@ impl App {
 
         // Focus through the runtime API before an application can consume its press.
         self.focus_pane_internal_via_api(ws_idx, pane_id);
+    }
+
+    pub(super) fn send_subagent_deep_focus(&mut self, ws_idx: usize, pane_id: PaneId, index: u32) {
+        if index >= 9 {
+            return;
+        }
+        let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
+            return;
+        };
+        let _ = runtime.try_send_bytes(Bytes::from(format!("\x1b[>8365;{}F", index + 1)));
     }
 
     fn handle_modified_url_click(
@@ -830,6 +848,8 @@ fn wait_for_file(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terminal::TerminalRuntime;
+    use crate::workspace::Workspace;
 
     fn test_app() -> App {
         App::new(
@@ -839,6 +859,37 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel().1,
             crate::api::EventHub::default(),
         )
+    }
+
+    #[tokio::test]
+    async fn send_subagent_deep_focus_writes_byte_exact_sequence() {
+        let mut app = test_app();
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        ws.tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+
+        app.send_subagent_deep_focus(0, pane, 0);
+
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;1F"));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn send_subagent_deep_focus_skips_double_digit_ordinals() {
+        let mut app = test_app();
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        ws.tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+
+        app.send_subagent_deep_focus(0, pane, 9);
+
+        assert!(rx.try_recv().is_err());
     }
 
     #[tokio::test]
