@@ -500,23 +500,27 @@ impl AppState {
         }
 
         let mut row_y = body.y;
-        for detail in crate::ui::agent_panel_entries(self)
-            .into_iter()
-            .skip(self.agent_panel_scroll)
-        {
-            if row_y.saturating_add(1) >= body.y + body.height {
+        let body_bottom = body.y + body.height;
+        let entries = crate::ui::agent_panel_entries(self);
+        let scroll = self.agent_panel_scroll.min(metrics.max_offset_from_bottom);
+        for (index, detail) in entries.iter().enumerate().skip(scroll) {
+            let height = crate::ui::agent_entry_height_in_body(self, detail, body.height);
+            if row_y.saturating_add(height) > body_bottom {
                 break;
             }
-            if row == row_y || row == row_y + 1 {
+            if row >= row_y && row < row_y.saturating_add(height) {
                 if !detail.is_title_header {
                     return None;
                 }
-                return detail.session_title.map(|title| (detail.pane_id, title));
+                return detail
+                    .session_title
+                    .clone()
+                    .map(|title| (detail.pane_id, title));
             }
-            row_y = row_y.saturating_add(2);
-            if row_y < body.y + body.height {
-                row_y = row_y.saturating_add(1);
-            }
+            row_y = row_y
+                .saturating_add(height)
+                .saturating_add(crate::ui::agent_entry_gap(self, index, entries.len()))
+                .min(body_bottom);
         }
         None
     }
@@ -1071,6 +1075,187 @@ mod tests {
         assert!(entries
             .iter()
             .any(|entry| entry.agent_label.as_deref() == Some("reviewer")));
+    }
+
+    #[test]
+    fn clicking_first_subagent_row_after_a_title_header_hits_that_subagent() {
+        let mut app = app_for_mouse_test();
+        let ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.agent_panel_scope = AgentPanelScope::Space;
+        app.state.agent_panel_subagents = true;
+        app.state.sidebar_agents.row_gap = 1;
+
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .detected_agent = Some(Agent::Pi);
+        assert!(app
+            .state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![
+                    SubagentEntryState {
+                        id: "a".into(),
+                        agent_label: "explorer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 1,
+                    },
+                    SubagentEntryState {
+                        id: "b".into(),
+                        agent_label: "reviewer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 2,
+                    },
+                ],
+                None,
+                Some("alpha".into()),
+            ));
+
+        let detail_area = app.state.agent_panel_rect();
+        let metrics = agent_panel_scroll_metrics(&app.state, detail_area);
+        let body = agent_panel_body_rect(detail_area, should_show_scrollbar(metrics));
+        let entries = crate::ui::agent_panel_entries(&app.state);
+        assert!(entries[0].is_title_header);
+
+        let first_agent_line1_row = body.y + 2;
+        assert_eq!(
+            app.state.agent_detail_target_at(first_agent_line1_row),
+            Some((0, 0, pane, Some(1))),
+            "clicking the row rendering the first subagent's icon/name must hit that subagent, not the blank separator after it"
+        );
+
+        let first_agent_line2_row = body.y + 3;
+        assert_eq!(
+            app.state.agent_detail_target_at(first_agent_line2_row),
+            Some((0, 0, pane, Some(1))),
+        );
+
+        let blank_separator_row = body.y + 4;
+        assert_eq!(app.state.agent_detail_target_at(blank_separator_row), None);
+
+        let second_agent_line1_row = body.y + 5;
+        assert_eq!(
+            app.state.agent_detail_target_at(second_agent_line1_row),
+            Some((0, 0, pane, Some(2))),
+        );
+    }
+
+    #[test]
+    fn clicking_second_group_header_after_a_prior_group_toggles_that_group() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let first_pane = ws.tabs[0].root_pane;
+        let second_pane = ws.test_split(Direction::Horizontal);
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.agent_panel_scope = AgentPanelScope::Space;
+        app.state.agent_panel_subagents = true;
+        app.state.sidebar_agents.row_gap = 1;
+
+        for pane in [first_pane, second_pane] {
+            let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .detected_agent = Some(Agent::Pi);
+        }
+
+        let first_terminal_id = app.state.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .state
+            .terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    agent_seq: 1,
+                }],
+                None,
+                Some("alpha".into()),
+            ));
+
+        let second_terminal_id = app.state.workspaces[0].tabs[0].panes[&second_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .state
+            .terminals
+            .get_mut(&second_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "builder".into(),
+                    state: AgentState::Idle,
+                    description: None,
+                    agent_seq: 5,
+                }],
+                None,
+                Some("beta".into()),
+            ));
+
+        let detail_area = app.state.agent_panel_rect();
+        let metrics = agent_panel_scroll_metrics(&app.state, detail_area);
+        let body = agent_panel_body_rect(detail_area, should_show_scrollbar(metrics));
+        let entries = crate::ui::agent_panel_entries(&app.state);
+        assert_eq!(entries.len(), 4);
+        assert!(entries[0].is_title_header);
+        assert!(entries[2].is_title_header);
+        assert_eq!(entries[2].pane_id, second_pane);
+
+        let second_header_row = body.y + 5;
+        assert_eq!(
+            app.state.agent_panel_header_at(second_header_row),
+            Some((second_pane, "beta".to_string())),
+            "clicking the row rendering the second group's header must hit that header, not fall through to nothing"
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            second_header_row,
+        ));
+
+        assert!(app
+            .state
+            .agent_panel_collapsed
+            .contains(&(second_pane, "beta".to_string())));
+        assert!(!app
+            .state
+            .agent_panel_collapsed
+            .contains(&(first_pane, "alpha".to_string())));
     }
 
     #[tokio::test]

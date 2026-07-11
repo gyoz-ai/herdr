@@ -730,6 +730,9 @@ pub(crate) fn agent_entry_height_in_body(
     entry: &AgentPanelEntry,
     body_height: u16,
 ) -> u16 {
+    if entry.is_title_header {
+        return 1.min(body_height);
+    }
     (resolved_agent_rows(app, entry)
         .len()
         .max(1)
@@ -2624,6 +2627,322 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert!(collapsed_rows[0].contains("standup notes (1)"));
         assert!(collapsed_rows[1].trim().is_empty());
         assert!(collapsed_rows[2].contains("standup notes (1)"));
+    }
+
+    #[test]
+    fn subagent_group_rows_have_no_double_blank_lines() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let first_pane = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_scope = AgentPanelScope::Space;
+        app.agent_panel_subagents = true;
+        app.sidebar_agents.row_gap = 1;
+
+        let first_terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .detected_agent = Some(Agent::Pi);
+        assert!(app
+            .terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![
+                    SubagentEntryState {
+                        id: "a".into(),
+                        agent_label: "explorer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 1,
+                    },
+                    SubagentEntryState {
+                        id: "b".into(),
+                        agent_label: "reviewer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 2,
+                    },
+                    SubagentEntryState {
+                        id: "c".into(),
+                        agent_label: "builder".into(),
+                        state: AgentState::Idle,
+                        description: None,
+                        agent_seq: 3,
+                    },
+                ],
+                None,
+                Some("Review scout findings on settlem".into()),
+            ));
+
+        let area = Rect::new(0, 0, 40, 20);
+        let runtimes = TerminalRuntimeRegistry::new();
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_agent_detail(&app, &runtimes, frame, area))
+            .expect("agent panel should render");
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = (0..11)
+            .map(|offset| {
+                (body.x..body.x + body.width)
+                    .map(|x| buffer[(x, body.y + offset)].symbol())
+                    .collect::<String>()
+            })
+            .collect();
+        assert!(rows[0].contains("Review scout findings on settlem"));
+        assert!(
+            rows[1].trim().is_empty(),
+            "row1 should be the single header separator, got {:?}",
+            rows[1]
+        );
+        assert!(
+            rows[2].contains("explorer"),
+            "row2 should be the first agent's line1, got {:?}",
+            rows[2]
+        );
+        assert!(
+            rows[2].contains('\u{2514}'),
+            "first agent row should keep its \u{2514} indent glyph"
+        );
+        assert!(
+            !rows[3].trim().is_empty(),
+            "row3 should be the first agent's line2 (subtitle), got {:?}",
+            rows[3]
+        );
+        assert!(
+            rows[4].trim().is_empty(),
+            "row4 should be a single separator, got {:?}",
+            rows[4]
+        );
+        assert!(
+            rows[5].contains("reviewer"),
+            "row5 should be the second agent's line1, got {:?}",
+            rows[5]
+        );
+        assert!(
+            !rows[6].trim().is_empty(),
+            "row6 should be the second agent's line2, got {:?}",
+            rows[6]
+        );
+        assert!(
+            rows[7].trim().is_empty(),
+            "row7 should be a single separator, got {:?}",
+            rows[7]
+        );
+        assert!(
+            rows[8].contains("builder"),
+            "row8 should be the third agent's line1, got {:?}",
+            rows[8]
+        );
+        assert!(
+            !rows[9].trim().is_empty(),
+            "row9 should be the third agent's line2, got {:?}",
+            rows[9]
+        );
+    }
+
+    #[test]
+    fn subagent_group_boundary_has_no_extra_blank_between_groups() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = Workspace::test_new("one");
+        let first_pane = workspace.tabs[0].root_pane;
+        let second_pane = workspace.test_split(Direction::Horizontal);
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_scope = AgentPanelScope::Space;
+        app.agent_panel_subagents = true;
+        app.sidebar_agents.row_gap = 1;
+
+        for pane in [first_pane, second_pane] {
+            let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Pi);
+        }
+
+        let first_terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    agent_seq: 1,
+                }],
+                None,
+                Some("alpha group".into()),
+            ));
+
+        let second_terminal_id = app.workspaces[0].tabs[0].panes[&second_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .terminals
+            .get_mut(&second_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "builder".into(),
+                    state: AgentState::Idle,
+                    description: None,
+                    agent_seq: 1,
+                }],
+                None,
+                Some("beta group".into()),
+            ));
+
+        let area = Rect::new(0, 0, 40, 24);
+        let runtimes = TerminalRuntimeRegistry::new();
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_agent_detail(&app, &runtimes, frame, area))
+            .expect("agent panel should render");
+        let buffer = terminal.backend().buffer();
+        let rows: Vec<String> = (0..10)
+            .map(|offset| {
+                (body.x..body.x + body.width)
+                    .map(|x| buffer[(x, body.y + offset)].symbol())
+                    .collect::<String>()
+            })
+            .collect();
+        assert!(rows[0].contains("alpha group"));
+        assert!(
+            rows[1].trim().is_empty(),
+            "row1 should be a single separator, got {:?}",
+            rows[1]
+        );
+        assert!(
+            rows[2].contains("explorer"),
+            "row2 should be the first group's agent line1, got {:?}",
+            rows[2]
+        );
+        assert!(
+            !rows[3].trim().is_empty(),
+            "row3 should be the first group's agent line2, got {:?}",
+            rows[3]
+        );
+        assert!(
+            rows[4].trim().is_empty(),
+            "row4 should be a single separator, got {:?}",
+            rows[4]
+        );
+        assert!(
+            rows[5].contains("beta group"),
+            "row5 should be the second group's header directly after one blank, got {:?}",
+            rows[5]
+        );
+        assert!(
+            rows[6].trim().is_empty(),
+            "row6 should be a single separator, got {:?}",
+            rows[6]
+        );
+        assert!(
+            rows[7].contains("builder"),
+            "row7 should be the second group's agent line1, got {:?}",
+            rows[7]
+        );
+        assert!(
+            !rows[8].trim().is_empty(),
+            "row8 should be the second group's agent line2, got {:?}",
+            rows[8]
+        );
+        assert!(
+            rows[9].trim().is_empty(),
+            "row9 should be a single separator, got {:?}",
+            rows[9]
+        );
+    }
+
+    #[test]
+    fn agent_panel_viewport_credits_a_title_header_as_one_content_row_not_two() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let pane = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_scope = AgentPanelScope::Space;
+        app.agent_panel_subagents = true;
+
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Pi);
+        assert!(app
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![
+                    SubagentEntryState {
+                        id: "a".into(),
+                        agent_label: "explorer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 1,
+                    },
+                    SubagentEntryState {
+                        id: "b".into(),
+                        agent_label: "reviewer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 2,
+                    },
+                    SubagentEntryState {
+                        id: "c".into(),
+                        agent_label: "builder".into(),
+                        state: AgentState::Idle,
+                        description: None,
+                        agent_seq: 3,
+                    },
+                ],
+                None,
+                Some("alpha".into()),
+            ));
+
+        assert_eq!(agent_panel_entries(&app).len(), 4);
+
+        let area = Rect::new(0, 0, 40, 13);
+        let body = agent_panel_body_rect(area, false);
+        assert_eq!(body.height, 10);
+
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        assert_eq!(
+            metrics.viewport_rows, 4,
+            "all 4 entries (1-row header + three 2-row agent rows) fit in a 10-row body"
+        );
+        assert_eq!(metrics.max_offset_from_bottom, 0);
+        assert!(!should_show_scrollbar(metrics));
     }
 
     #[test]

@@ -646,6 +646,107 @@ mod tests {
         assert!(screen.contains("project"), "{screen}");
     }
 
+    #[test]
+    fn real_entrypoint_renders_agent_panel_group_without_double_blank_lines() {
+        use crate::detect::Agent;
+        use crate::detect::AgentState;
+        use crate::terminal::SubagentEntryState;
+
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let first_pane = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_scope = crate::app::state::AgentPanelScope::Space;
+        app.agent_panel_subagents = true;
+        app.sidebar_agents.row_gap = 1;
+
+        let first_terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .detected_agent = Some(Agent::Pi);
+        assert!(app
+            .terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![
+                    SubagentEntryState {
+                        id: "a".into(),
+                        agent_label: "explorer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 1,
+                    },
+                    SubagentEntryState {
+                        id: "b".into(),
+                        agent_label: "reviewer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 2,
+                    },
+                    SubagentEntryState {
+                        id: "c".into(),
+                        agent_label: "builder".into(),
+                        state: AgentState::Idle,
+                        description: None,
+                        agent_seq: 3,
+                    },
+                ],
+                None,
+                Some("Review scout findings on settlement reconciliation".into()),
+            ));
+
+        let area = Rect::new(0, 0, 140, 45);
+        compute_view(&mut app, area);
+
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render(&app, frame))
+            .expect("full ui should render");
+        let buffer = terminal.backend().buffer();
+        let sb = app.view.sidebar_rect;
+        let rows: Vec<String> = (sb.y..sb.y + sb.height)
+            .map(|y| {
+                (sb.x..sb.x + sb.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect()
+            })
+            .collect();
+        let header_idx = rows
+            .iter()
+            .position(|row| row.contains("Review scout findings"))
+            .expect("group header should be visible in the real sidebar render");
+        let is_blank = |row: &str| row.trim_end_matches('│').trim().is_empty();
+
+        assert!(
+            is_blank(&rows[header_idx + 1]),
+            "exactly one blank between the header and the first agent row, got {:?}",
+            rows[header_idx + 1]
+        );
+        assert!(rows[header_idx + 2].contains("explorer"));
+        assert!(rows[header_idx + 2].contains('\u{2514}'));
+        assert!(!is_blank(&rows[header_idx + 3]));
+        assert!(
+            is_blank(&rows[header_idx + 4]),
+            "exactly one blank between consecutive agent rows, got {:?}",
+            rows[header_idx + 4]
+        );
+        assert!(rows[header_idx + 5].contains("reviewer"));
+        assert!(!is_blank(&rows[header_idx + 6]));
+        assert!(is_blank(&rows[header_idx + 7]));
+        assert!(rows[header_idx + 8].contains("builder"));
+        assert!(!is_blank(&rows[header_idx + 9]));
+    }
+
     #[tokio::test]
     async fn focused_pane_cursor_wins_during_terminal_render() {
         let mut app = crate::app::state::AppState::test_new();
