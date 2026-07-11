@@ -12,7 +12,7 @@ use self::tokens::{ResolvedToken, ResolvedTokenKind, SpaceTokenContext};
 use super::scrollbar::{render_scrollbar, should_show_scrollbar};
 use super::status::{agent_icon, state_dot, state_label, state_label_color};
 use super::text::{display_width, display_width_u16, truncate_end};
-use crate::app::state::{AgentPanelScope, AgentPanelSort, Palette};
+use crate::app::state::{AgentPanelScope, Palette};
 use crate::app::{AppState, Mode};
 use crate::detect::AgentState;
 use crate::terminal::TerminalRuntimeRegistry;
@@ -86,17 +86,6 @@ pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect
     Rect::new(content.x, content.y + ws_h, content.width, 1)
 }
 
-fn agent_panel_sort_label(sort: AgentPanelSort) -> &'static str {
-    match sort {
-        AgentPanelSort::Spaces => "grouped",
-        AgentPanelSort::Priority => "priority",
-    }
-}
-
-pub(crate) fn agent_panel_toggle_rect(area: Rect, sort: AgentPanelSort) -> Rect {
-    agent_panel_header_label_rect(area, agent_panel_sort_label(sort))
-}
-
 fn agent_panel_header_label_rect(area: Rect, label: &str) -> Rect {
     if area.width == 0 || area.height < 2 {
         return Rect::default();
@@ -116,7 +105,6 @@ fn active_agent_view_label(app: &AppState) -> Option<&str> {
         .as_ref()
         .map(|view| view.label.as_deref().unwrap_or("filtered"))
 }
-
 pub(crate) fn agent_panel_entries(app: &AppState) -> Vec<AgentPanelEntry> {
     agent_panel_entries_with_runtimes(app, None)
 }
@@ -213,6 +201,7 @@ fn collect_agent_panel_entries_with_runtimes(
                             state: subagent.state,
                             seen: true,
                             last_agent_state_change_seq: detail.last_agent_state_change_seq,
+
                             state_labels: HashMap::new(),
                             tokens: HashMap::new(),
                             subagent_seq: Some(subagent.agent_seq),
@@ -1503,23 +1492,18 @@ fn render_agent_detail(
         )])),
         Rect::new(area.x, area.y + 1, area.width, 1),
     );
-    let control_label = active_agent_view_label(app)
-        .unwrap_or_else(|| agent_panel_sort_label(app.agent_panel_sort));
-    let toggle_rect = agent_panel_header_label_rect(area, control_label);
-    if toggle_rect != Rect::default() {
-        let color = if app.agent_view_override.is_some() {
-            p.accent
-        } else {
-            p.overlay0
-        };
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                control_label,
-                Style::default().fg(color).add_modifier(Modifier::BOLD),
-            ))
-            .alignment(Alignment::Right),
-            toggle_rect,
-        );
+    if let Some(control_label) = active_agent_view_label(app) {
+        let toggle_rect = agent_panel_header_label_rect(area, control_label);
+        if toggle_rect != Rect::default() {
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    control_label,
+                    Style::default().fg(p.accent).add_modifier(Modifier::BOLD),
+                ))
+                .alignment(Alignment::Right),
+                toggle_rect,
+            );
+        }
     }
 
     let details = agent_panel_entries_from(app, terminal_runtimes);
@@ -3092,48 +3076,33 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
-    fn priority_agent_panel_sort_uses_attention_then_space_order() {
+    fn hidden_entries_are_filtered_from_agent_panel() {
         let mut app = crate::app::state::AppState::test_new();
-        app.workspaces = vec![
-            Workspace::test_new("one"),
-            Workspace::test_new("two"),
-            Workspace::test_new("three"),
-            Workspace::test_new("four"),
-        ];
+        app.workspaces = vec![Workspace::test_new("one"), Workspace::test_new("two")];
         app.ensure_test_terminals();
         app.agent_panel_subagents = false;
         app.active = Some(0);
         app.selected = 0;
         app.agent_panel_scope = AgentPanelScope::All;
-        app.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
-
-        let set_state = |app: &mut crate::app::state::AppState, ws_idx: usize, state| {
+        for ws_idx in 0..2 {
             let pane = app.workspaces[ws_idx].tabs[0].root_pane;
             let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane]
                 .attached_terminal_id
                 .clone();
-            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
-            terminal.detected_agent = Some(Agent::Claude);
-            terminal.state = state;
-        };
-        set_state(&mut app, 0, AgentState::Working);
-        set_state(&mut app, 1, AgentState::Idle);
-        set_state(&mut app, 2, AgentState::Working);
-        set_state(&mut app, 3, AgentState::Blocked);
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Claude);
+        }
 
-        let done_pane = app.workspaces[1].tabs[0].root_pane;
-        app.workspaces[1].tabs[0]
-            .panes
-            .get_mut(&done_pane)
-            .unwrap()
-            .seen = false;
+        let hidden_pane = app.workspaces[0].tabs[0].root_pane;
+        app.agent_panel_hidden.insert((hidden_pane, None));
+        app.agent_panel_hidden
+            .insert((app.workspaces[1].tabs[0].root_pane, Some(0)));
 
         let labels: Vec<String> = agent_panel_entries(&app)
             .into_iter()
             .map(|entry| entry.primary_label)
             .collect();
 
-        assert_eq!(labels, ["four", "two", "one", "three"]);
+        assert_eq!(labels, ["two"]);
     }
 
     #[test]
@@ -3194,54 +3163,6 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(buffer[(detail_area.x, tenth_row)].symbol(), "1");
         assert_eq!(buffer[(detail_area.x + 1, tenth_row)].symbol(), "0");
         assert_eq!(buffer[(detail_area.x + 2, tenth_row)].symbol(), "○");
-    }
-
-    #[test]
-    fn collapsed_sidebar_numbers_priority_agents_by_list_position() {
-        let first = Workspace::test_new("one");
-        let first_pane = first.tabs[0].root_pane;
-        let mut second = Workspace::test_new("two");
-        let second_pane = second.tabs[0].root_pane;
-        let urgent_pane = second.test_split(ratatui::layout::Direction::Horizontal);
-
-        let mut app = crate::app::state::AppState::test_new();
-        app.workspaces = vec![first, second];
-        app.ensure_test_terminals();
-        app.agent_panel_sort = crate::app::state::AgentPanelSort::Priority;
-
-        let set_state = |app: &mut crate::app::state::AppState, ws_idx: usize, pane_id, state| {
-            let terminal_id = app.workspaces[ws_idx].tabs[0].panes[&pane_id]
-                .attached_terminal_id
-                .clone();
-            let terminal = app.terminals.get_mut(&terminal_id).unwrap();
-            terminal.detected_agent = Some(Agent::Claude);
-            terminal.state = state;
-        };
-        set_state(&mut app, 0, first_pane, AgentState::Working);
-        set_state(&mut app, 1, second_pane, AgentState::Working);
-        set_state(&mut app, 1, urgent_pane, AgentState::Blocked);
-
-        assert_eq!(app.workspaces[1].public_pane_number(urgent_pane), Some(2));
-        assert_eq!(agent_panel_entries(&app)[0].pane_id, urgent_pane);
-
-        let area = Rect::new(0, 0, 4, 16);
-        let (_, _, detail_area) = collapsed_sidebar_sections(area);
-        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
-            .expect("test terminal should initialize");
-
-        terminal
-            .draw(|frame| render_sidebar_collapsed(&app, frame, area))
-            .expect("collapsed sidebar should render");
-
-        let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(detail_area.x, detail_area.y)].symbol(), "1");
-        assert_eq!(buffer[(detail_area.x, detail_area.y + 1)].symbol(), "2");
-        assert_eq!(buffer[(detail_area.x, detail_area.y + 2)].symbol(), "3");
-        assert_eq!(buffer[(detail_area.x + 2, detail_area.y)].symbol(), "◉");
-        assert_eq!(
-            buffer[(detail_area.x + 2, detail_area.y)].style().fg,
-            Some(app.palette.red)
-        );
     }
 
     #[cfg(unix)]
