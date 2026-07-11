@@ -2309,6 +2309,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn real_sgr_bytes_press_drag_over_click_tracking_pane_starts_herdr_selection() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                4,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        let down_bytes = format!("\x1b[<0;{};{}M", col + 1, row + 1).into_bytes();
+        let drag_bytes = format!("\x1b[<32;{};{}M", col + 5 + 1, row + 2 + 1).into_bytes();
+        let up_bytes = format!("\x1b[<0;{};{}m", col + 5 + 1, row + 2 + 1).into_bytes();
+
+        for event in crate::raw_input::parse_raw_input_bytes_sync(&down_bytes) {
+            app.handle_raw_input_event(event).await;
+        }
+        assert!(app.state.pending_pane_click.is_some());
+
+        for event in crate::raw_input::parse_raw_input_bytes_sync(&drag_bytes) {
+            app.handle_raw_input_event(event).await;
+        }
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app
+            .state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_visible));
+        assert!(input_rx.try_recv().is_err());
+
+        for event in crate::raw_input::parse_raw_input_bytes_sync(&up_bytes) {
+            app.handle_raw_input_event(event).await;
+        }
+        assert!(app.state.selection.is_none());
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn click_to_focus_then_drag_select_over_click_tracking_pane_within_double_click_window() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                4,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        input_rx.try_recv().ok();
+        input_rx.try_recv().ok();
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(
+            app.state.pending_pane_click.is_some(),
+            "a fresh press immediately after a plain click must still start pane-scoped tracking"
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            col + 5,
+            row + 2,
+        ));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app
+            .state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_visible));
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn press_drag_over_click_tracking_pane_with_computed_view_geometry_starts_selection() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                80,
+                18,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                4,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 106, 20));
+        let info = app.state.view.pane_infos[0].clone();
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(
+            app.state.pending_pane_click.is_some(),
+            "pending click must be tracked with real rendered pane geometry"
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            col + 5,
+            row + 2,
+        ));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app
+            .state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_visible));
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn button_motion_tracking_pane_left_click_drag_keeps_forwarding_without_selection() {
         let mut app = app_for_mouse_test();
         let mut ws = Workspace::test_new("test");
@@ -2349,6 +2498,65 @@ mod tests {
             input_rx.try_recv().expect("forwarded left mouse drag"),
             Bytes::from_static(b"\x1b[<32;4;4M")
         );
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn press_drag_over_unfocused_click_tracking_pane_in_split_starts_selection() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let first_pane = ws.tabs[0].root_pane;
+        let target_pane = ws.test_split(Direction::Horizontal);
+        ws.tabs[0].layout.focus_pane(first_pane);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        crate::ui::compute_view(&mut app.state, Rect::new(0, 0, 100, 20));
+
+        let target_info = app
+            .state
+            .view
+            .pane_infos
+            .iter()
+            .find(|info| info.id == target_pane)
+            .expect("target pane info")
+            .clone();
+
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                target_info.inner_rect.width,
+                target_info.inner_rect.height,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                4,
+            );
+        app.state.insert_test_runtime(target_pane, runtime);
+
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(first_pane));
+
+        let col = target_info.inner_rect.x + 2;
+        let row = target_info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(target_pane));
+        assert!(
+            app.state.pending_pane_click.is_some(),
+            "pending click must be tracked even when the click also focuses the pane"
+        );
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            col + 5,
+            row + 2,
+        ));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app
+            .state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_visible));
         assert!(input_rx.try_recv().is_err());
     }
 
