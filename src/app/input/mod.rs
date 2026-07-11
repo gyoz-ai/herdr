@@ -503,13 +503,13 @@ impl App {
     }
 
     pub(super) fn send_subagent_deep_focus(&mut self, ws_idx: usize, pane_id: PaneId, index: u32) {
-        if index >= 9 {
+        if index == 0 || index > 9 {
             return;
         }
         let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
             return;
         };
-        let _ = runtime.try_send_bytes(Bytes::from(format!("\x1b[>8365;{}F", index + 1)));
+        let _ = runtime.try_send_bytes(Bytes::from(format!("\x1b[>8365;{}F", index)));
     }
 
     fn handle_modified_url_click(
@@ -871,9 +871,22 @@ mod tests {
         app.state.workspaces = vec![ws];
         app.state.active = Some(0);
 
-        app.send_subagent_deep_focus(0, pane, 0);
+        app.send_subagent_deep_focus(0, pane, 1);
 
         assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;1F"));
+        assert!(rx.try_recv().is_err());
+    } #[tokio::test]
+    async fn send_subagent_deep_focus_skips_ordinal_zero() {
+        let mut app = test_app();
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        ws.tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+
+        app.send_subagent_deep_focus(0, pane, 0);
+
         assert!(rx.try_recv().is_err());
     }
 
@@ -887,7 +900,7 @@ mod tests {
         app.state.workspaces = vec![ws];
         app.state.active = Some(0);
 
-        app.send_subagent_deep_focus(0, pane, 9);
+        app.send_subagent_deep_focus(0, pane, 10);
 
         assert!(rx.try_recv().is_err());
     }

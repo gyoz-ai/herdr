@@ -1912,14 +1912,14 @@ mod tests {
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 0,
+                    index: 1,
                 },
                 SubagentEntryState {
                     id: "b".into(),
                     agent_label: "reviewer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 1,
+                    index: 2,
                 },
             ],
         ));

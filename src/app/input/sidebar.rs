@@ -735,14 +735,14 @@ mod tests {
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 0,
+                    index: 1,
                 },
                 SubagentEntryState {
                     id: "b".into(),
                     agent_label: "reviewer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 1,
+                    index: 2,
                 },
             ],
         ));
@@ -753,7 +753,7 @@ mod tests {
         let second_row = body.y + 3;
         assert_eq!(
             app.state.agent_detail_target_at(second_row),
-            Some((0, 0, pane, Some(1)))
+            Some((0, 0, pane, Some(2)))
         );
 
         app.handle_mouse(mouse(
@@ -916,14 +916,14 @@ mod tests {
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 0,
+                    index: 1,
                 },
                 SubagentEntryState {
                     id: "b".into(),
                     agent_label: "reviewer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 1,
+                    index: 2,
                 },
             ],
         ));
@@ -946,7 +946,7 @@ mod tests {
             ContextMenuKind::Agent {
                 ws_idx: 0,
                 pane_id: pane,
-                subagent_index: Some(1),
+                subagent_index: Some(2),
             }
         );
         assert_eq!(menu.items(), ["Remove from list", "Stop agent"]);

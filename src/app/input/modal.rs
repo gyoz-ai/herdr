@@ -1311,8 +1311,8 @@ impl App {
                 Some("Stop agent"),
             ) => {
                 let payload = match subagent_index {
-                    Some(index) if index >= 9 => None,
-                    Some(index) => Some(Bytes::from(format!("\x1b[>8365;{}K", index + 1))),
+                    Some(index) if index == 0 || index > 9 => None,
+                    Some(index) => Some(Bytes::from(format!("\x1b[>8365;{}K", index))),
                     None => Some(Bytes::from_static(b"\x1b")),
                 };
                 if let (Some(payload), Some(runtime)) =
