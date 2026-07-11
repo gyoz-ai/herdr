@@ -31,7 +31,7 @@ cargo nextest run
 If a gpg agent prompt hangs the worktree tests, disable signing for the run:
 
 ```sh
-GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign=false GIT_CONFIG_KEY_1=tag.gpgsign=false cargo nextest run
+GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=commit.gpgsign GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false cargo nextest run
 ```
 
 ## Local install
