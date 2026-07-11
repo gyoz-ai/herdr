@@ -26,6 +26,7 @@ enum WheelRouting {
 
 const WORKSPACE_DRAG_THRESHOLD: u16 = 1;
 const TAB_DRAG_THRESHOLD: u16 = 1;
+const PANE_CLICK_DRAG_THRESHOLD: u16 = 1;
 
 fn modified_url_click_modifier() -> KeyModifiers {
     KeyModifiers::CONTROL

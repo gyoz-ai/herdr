@@ -1,5 +1,5 @@
 use crate::config::{Keybinds, NewTerminalCwdConfig, SoundConfig, ToastConfig, ToastDelivery};
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyModifiers, MouseEvent};
 use ratatui::layout::{Direction, Rect};
 use ratatui::style::Color;
 use std::collections::HashSet;
@@ -1201,6 +1201,13 @@ pub(crate) struct TabPressState {
     pub start_row: u16,
 }
 
+pub(crate) struct PendingPaneClickState {
+    pub pane_id: PaneId,
+    pub start_col: u16,
+    pub start_row: u16,
+    pub press: MouseEvent,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContextMenuKind {
     Workspace {
@@ -1475,6 +1482,7 @@ pub struct AppState {
     pub(crate) drag: Option<DragState>,
     pub(crate) workspace_press: Option<WorkspacePressState>,
     pub(crate) tab_press: Option<TabPressState>,
+    pub(crate) pending_pane_click: Option<PendingPaneClickState>,
     pub selection: Option<Selection>,
     pub selection_autoscroll: Option<SelectionAutoscroll>,
     pub context_menu: Option<ContextMenuState>,
@@ -1863,6 +1871,7 @@ impl AppState {
             drag: None,
             workspace_press: None,
             tab_press: None,
+            pending_pane_click: None,
             selection: None,
             selection_autoscroll: None,
             context_menu: None,

@@ -6,8 +6,8 @@ use tracing::warn;
 use crate::{
     app::state::{
         AgentPanelSort, AppState, ContextMenuKind, ContextMenuState, DragState, DragTarget,
-        MenuListState, Mode, RightClickPassthroughGesture, TabPressState, ViewLayout,
-        WorkspacePressState,
+        MenuListState, Mode, PendingPaneClickState, RightClickPassthroughGesture, TabPressState,
+        ViewLayout, WorkspacePressState,
     },
     layout::{PaneInfo, SplitBorder},
     selection::Selection,
@@ -22,8 +22,9 @@ use super::{
         modal_action_from_buttons, open_global_menu, open_new_tab_dialog, ModalAction,
     },
     settings::SettingsAction,
-    ScrollbarClickTarget, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
+    ScrollbarClickTarget, PANE_CLICK_DRAG_THRESHOLD, TAB_DRAG_THRESHOLD, WORKSPACE_DRAG_THRESHOLD,
 };
+use crate::input::MouseProtocolMode;
 
 pub(super) enum MouseAction {
     NewWorkspace,
@@ -223,6 +224,7 @@ impl AppState {
                 self.selection = None;
                 self.selection_autoscroll = None;
                 self.workspace_press = None;
+                self.pending_pane_click = None;
 
                 if self.mode == Mode::ConfirmClose {
                     let popup = self.confirm_close_rect();
@@ -642,6 +644,36 @@ impl AppState {
                         self.mode = Mode::Terminal;
                     }
 
+                    let click_only_tracking = self
+                        .active
+                        .and_then(|ws_idx| {
+                            self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id)
+                        })
+                        .and_then(|rt| rt.input_state())
+                        .is_some_and(|input_state| {
+                            matches!(
+                                input_state.mouse_protocol_mode,
+                                MouseProtocolMode::Press | MouseProtocolMode::PressRelease
+                            )
+                        });
+
+                    if click_only_tracking {
+                        self.pending_pane_click = Some(PendingPaneClickState {
+                            pane_id: info.id,
+                            start_col: mouse.column,
+                            start_row: mouse.row,
+                            press: mouse,
+                        });
+                        if let Some(ws_idx) = self.active {
+                            return Some(MouseAction::FocusPane {
+                                ws_idx,
+                                pane_id: info.id,
+                                deep_focus: None,
+                            });
+                        }
+                        return None;
+                    }
+
                     if self.forward_pane_mouse_button(terminal_runtimes, &info, mouse) {
                         self.selection = None;
                         self.selection_autoscroll = None;
@@ -679,6 +711,32 @@ impl AppState {
                     return None;
                 }
 
+                if let Some(pending) = self.pending_pane_click.as_ref() {
+                    let pane_id = pending.pane_id;
+                    let start_col = pending.start_col;
+                    let start_row = pending.start_row;
+                    let exceeded = mouse
+                        .column
+                        .abs_diff(start_col)
+                        .max(mouse.row.abs_diff(start_row))
+                        > PANE_CLICK_DRAG_THRESHOLD;
+                    if !exceeded {
+                        return None;
+                    }
+                    self.pending_pane_click = None;
+                    if let Some(info) = self.pane_info_by_id(pane_id).cloned() {
+                        let (row, col) =
+                            (start_row - info.inner_rect.y, start_col - info.inner_rect.x);
+                        self.selection = Some(Selection::anchor(
+                            info.id,
+                            row,
+                            col,
+                            self.pane_scroll_metrics(terminal_runtimes, info.id),
+                        ));
+                        self.update_selection_drag(terminal_runtimes, mouse.column, mouse.row);
+                    }
+                    return None;
+                }
                 if self.drag.is_none() {
                     if let Some(info) = self.pane_mouse_target(mouse.column, mouse.row).cloned() {
                         if self.forward_pane_mouse_button(terminal_runtimes, &info, mouse) {
@@ -831,6 +889,21 @@ impl AppState {
                         self.copy_selection(terminal_runtimes);
                     } else if let Some(selection) = self.selection.as_mut() {
                         selection.finish();
+                    }
+                    return None;
+                }
+
+                if let Some(pending) = self.pending_pane_click.take() {
+                    let exceeded = mouse
+                        .column
+                        .abs_diff(pending.start_col)
+                        .max(mouse.row.abs_diff(pending.start_row))
+                        > PANE_CLICK_DRAG_THRESHOLD;
+                    if !exceeded {
+                        if let Some(info) = self.pane_info_by_id(pending.pane_id).cloned() {
+                            self.forward_pane_mouse_button(terminal_runtimes, &info, pending.press);
+                            self.forward_pane_mouse_button(terminal_runtimes, &info, mouse);
+                        }
                     }
                     return None;
                 }
@@ -2136,6 +2209,147 @@ mod tests {
             input_rx.try_recv().expect("forwarded captured left press"),
             Bytes::from_static(b"\x1b[<0;2;2M")
         );
+    }
+
+    #[tokio::test]
+    async fn press_release_without_motion_forwards_byte_exact_sgr_pair_to_click_tracking_pane() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                4,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(app.state.pending_pane_click.is_some());
+        assert!(app.state.selection.is_none());
+        assert!(input_rx.try_recv().is_err());
+
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app.state.selection.is_none());
+        assert_eq!(
+            input_rx.try_recv().expect("forwarded left mouse down"),
+            Bytes::from_static(b"\x1b[<0;3;4M")
+        );
+        assert_eq!(
+            input_rx.try_recv().expect("forwarded left mouse up"),
+            Bytes::from_static(b"\x1b[<0;3;4m")
+        );
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn press_drag_beyond_threshold_over_click_tracking_pane_starts_herdr_selection_and_forwards_nothing(
+    ) {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1000h\x1b[?1006h",
+                4,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(app.state.pending_pane_click.is_some());
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Drag(MouseButton::Left),
+            col + 5,
+            row + 2,
+        ));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app
+            .state
+            .selection
+            .as_ref()
+            .is_some_and(crate::selection::Selection::is_visible));
+        assert!(input_rx.try_recv().is_err());
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Up(MouseButton::Left),
+            col + 5,
+            row + 2,
+        ));
+        assert!(app.state.selection.is_none());
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn button_motion_tracking_pane_left_click_drag_keeps_forwarding_without_selection() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"\x1b[?1002h\x1b[?1006h",
+                4,
+            );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app.state.selection.is_none());
+        assert_eq!(
+            input_rx.try_recv().expect("forwarded left mouse down"),
+            Bytes::from_static(b"\x1b[<0;3;4M")
+        );
+
+        app.handle_mouse(mouse(MouseEventKind::Drag(MouseButton::Left), col + 1, row));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app.state.selection.is_none());
+        assert_eq!(
+            input_rx.try_recv().expect("forwarded left mouse drag"),
+            Bytes::from_static(b"\x1b[<32;4;4M")
+        );
+        assert!(input_rx.try_recv().is_err());
     }
 
     #[tokio::test]
