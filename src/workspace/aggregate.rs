@@ -47,11 +47,14 @@ impl Tab {
                 let pane = self.panes.get(id)?;
                 let terminal = terminals.get(&pane.attached_terminal_id)?;
                 let agent_kind_label = terminal.effective_agent_label().map(str::to_string);
-                let fallback_agent_label = terminal
+                let detected_agent_label = terminal
                     .agent_name
                     .as_deref()
-                    .or(agent_kind_label.as_deref())?
-                    .to_string();
+                    .or(agent_kind_label.as_deref());
+                if detected_agent_label.is_none() && terminal.subagent_reports.is_empty() {
+                    return None;
+                }
+                let fallback_agent_label = detected_agent_label.unwrap_or_default().to_string();
                 let agent_label = terminal
                     .effective_display_agent()
                     .unwrap_or_else(|| fallback_agent_label.clone());

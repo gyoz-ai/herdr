@@ -2099,6 +2099,43 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
     }
 
     #[test]
+    fn subagent_rows_render_without_a_detected_root_agent() {
+        let mut app = crate::app::state::AppState::test_new();
+        let workspace = Workspace::test_new("one");
+        let pane = workspace.tabs[0].root_pane;
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_subagents = true;
+
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: Some("mapping code".into()),
+                    index: 0,
+                }],
+            ));
+
+        let entries = agent_panel_entries(&app);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].agent_label.as_deref(), Some("explorer"));
+        assert_eq!(entries[0].pane_id, pane);
+    }
+
+    #[test]
     fn subagent_mode_renders_empty_panel_without_panic() {
         let mut app = crate::app::state::AppState::test_new();
         let workspace = Workspace::test_new("one");
