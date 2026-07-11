@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::{Direction, Rect};
 use ratatui::style::Color;
 use std::hash::{Hash, Hasher};
+use std::collections::HashSet;
 
 use crate::detect::AgentState;
 use crate::layout::{PaneId, PaneInfo, SplitBorder};
@@ -1222,6 +1223,11 @@ pub enum ContextMenuKind {
         source_pane_id: Option<PaneId>,
         has_manual_label: bool,
     },
+    Agent {
+        ws_idx: usize,
+        pane_id: PaneId,
+        subagent_index: Option<u32>,
+    },
 }
 
 /// Right-click context menu state.
@@ -1318,6 +1324,7 @@ impl ContextMenuState {
                 "Zoom",
                 "Close pane",
             ],
+            ContextMenuKind::Agent { .. } => &["Remove from list", "Stop agent"],
         }
     }
 }
@@ -1504,6 +1511,7 @@ pub struct AppState {
     pub sidebar_spaces: crate::config::SpacesSidebarConfig,
     pub agent_panel_scope: AgentPanelScope,
     pub agent_panel_subagents: bool,
+    pub agent_panel_hidden: HashSet<(PaneId, Option<u32>)>,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -1884,6 +1892,7 @@ impl AppState {
             sidebar_spaces: crate::config::SpacesSidebarConfig::default(),
             agent_panel_scope: AgentPanelScope::Space,
             agent_panel_subagents: false,
+            agent_panel_hidden: HashSet::new(),
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,
@@ -2283,6 +2292,9 @@ impl AppState {
                     if let Some(source_pane_id) = source_pane_id {
                         assert_live_pane(source_pane_id, "context menu source pane");
                     }
+                }
+                ContextMenuKind::Agent { ws_idx, .. } => {
+                    assert_workspace_index(ws_idx, "context menu agent")
                 }
             }
         }

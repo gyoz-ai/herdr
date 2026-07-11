@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 #[cfg(test)]
 use ratatui::layout::Direction;
@@ -1287,6 +1288,39 @@ impl App {
                         Mode::Navigate
                     };
                 }
+            }
+            (
+                ContextMenuKind::Agent {
+                    pane_id,
+                    subagent_index,
+                    ..
+                },
+                Some("Remove from list"),
+            ) => {
+                self.state
+                    .agent_panel_hidden
+                    .insert((pane_id, subagent_index));
+                leave_modal(&mut self.state);
+            }
+            (
+                ContextMenuKind::Agent {
+                    ws_idx,
+                    pane_id,
+                    subagent_index,
+                },
+                Some("Stop agent"),
+            ) => {
+                let payload = match subagent_index {
+                    Some(index) if index >= 9 => None,
+                    Some(index) => Some(Bytes::from(format!("\x1b[>8365;{}K", index + 1))),
+                    None => Some(Bytes::from_static(b"\x1b")),
+                };
+                if let (Some(payload), Some(runtime)) =
+                    (payload, self.lookup_runtime_sender(ws_idx, pane_id))
+                {
+                    let _ = runtime.try_send_bytes(payload);
+                }
+                leave_modal(&mut self.state);
             }
             _ => leave_modal(&mut self.state),
         }

@@ -433,7 +433,6 @@ impl AppState {
             && row >= rect.y
             && row < rect.y + rect.height
     }
-
     pub(super) fn agent_detail_target_at(
         &self,
         row: u16,
@@ -486,15 +485,18 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
-    use bytes::Bytes;
     use crate::terminal::{SubagentEntryState, TerminalRuntime};
     use crate::ui::{agent_panel_body_rect, agent_panel_scroll_metrics, should_show_scrollbar};
     use crate::{
-        app::state::{AgentPanelScope, AgentPanelSort, DragTarget, Mode},
+        app::state::{
+            AgentPanelScope, AgentPanelSort, ContextMenuKind, ContextMenuState, DragTarget,
+            MenuListState, Mode,
+        },
         config::SidebarCollapsedModeConfig,
         detect::{Agent, AgentState},
         workspace::Workspace,
     };
+    use bytes::Bytes;
 
     #[test]
     fn clicking_launcher_opens_global_menu() {
@@ -887,6 +889,143 @@ mod tests {
         assert_eq!(app.state.agent_panel_scroll, 0);
     }
 
+    #[tokio::test]
+    async fn right_clicking_subagent_row_opens_agent_context_menu_and_stop_writes_stop_sequence() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        ws.tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = true;
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        let terminal = app.state.terminals.get_mut(&terminal_id).unwrap();
+        terminal.detected_agent = Some(Agent::Pi);
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![
+                SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    index: 0,
+                },
+                SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "reviewer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    index: 1,
+                },
+            ],
+        ));
+
+        let detail_area = app.state.agent_panel_rect();
+        let metrics = agent_panel_scroll_metrics(&app.state, detail_area);
+        let body = agent_panel_body_rect(detail_area, should_show_scrollbar(metrics));
+        let second_row = body.y + 3;
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Right),
+            2,
+            second_row,
+        ));
+
+        assert_eq!(app.state.mode, Mode::ContextMenu);
+        let menu = app.state.context_menu.take().expect("agent context menu");
+        assert_eq!(
+            menu.kind,
+            ContextMenuKind::Agent {
+                ws_idx: 0,
+                pane_id: pane,
+                subagent_index: Some(1),
+            }
+        );
+        assert_eq!(menu.items(), ["Remove from list", "Stop agent"]);
+
+        app.apply_context_menu_action_via_api(menu, 1);
+
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;2K"));
+        assert!(rx.try_recv().is_err());
+        assert_ne!(app.state.mode, Mode::ContextMenu);
+    }
+
+    #[tokio::test]
+    async fn stop_agent_menu_action_writes_escape_for_main_agent_row() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        ws.tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::ContextMenu;
+
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Agent {
+                ws_idx: 0,
+                pane_id: pane,
+                subagent_index: None,
+            },
+            x: 2,
+            y: 2,
+            list: MenuListState::new(0),
+        };
+        app.apply_context_menu_action_via_api(menu, 1);
+
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b"));
+        assert!(rx.try_recv().is_err());
+        assert_ne!(app.state.mode, Mode::ContextMenu);
+    }
+
+    #[test]
+    fn remove_from_list_menu_action_hides_agent_row() {
+        let mut app = app_for_mouse_test();
+        let ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.agent_panel_subagents = false;
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        app.state
+            .terminals
+            .get_mut(&terminal_id)
+            .unwrap()
+            .detected_agent = Some(Agent::Pi);
+        assert_eq!(crate::ui::agent_panel_entries(&app.state).len(), 1);
+        app.state.mode = Mode::ContextMenu;
+
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Agent {
+                ws_idx: 0,
+                pane_id: pane,
+                subagent_index: None,
+            },
+            x: 2,
+            y: 2,
+            list: MenuListState::new(0),
+        };
+        app.apply_context_menu_action_via_api(menu, 0);
+
+        assert!(app.state.agent_panel_hidden.contains(&(pane, None)));
+        assert!(crate::ui::agent_panel_entries(&app.state).is_empty());
+        assert_ne!(app.state.mode, Mode::ContextMenu);
+    }
+
     #[test]
     fn clicking_all_workspaces_agent_row_switches_to_correct_workspace() {
         let mut app = app_for_mouse_test();
@@ -1118,7 +1257,7 @@ mod tests {
     }
 
     #[test]
-    fn clicking_collapsed_priority_agent_row_switches_to_matching_workspace() {
+    fn clicking_collapsed_sorted_agent_row_switches_to_matching_workspace() {
         let mut app = app_for_mouse_test();
         let first = Workspace::test_new("one");
         let first_pane = first.tabs[0].root_pane;
@@ -1132,7 +1271,6 @@ mod tests {
         app.state.selected = 0;
         app.state.mode = Mode::Terminal;
         app.state.sidebar_collapsed = true;
-        app.state.agent_panel_sort = AgentPanelSort::Priority;
         app.state.agent_panel_scope = AgentPanelScope::All;
         app.state.view.sidebar_rect = Rect::new(0, 0, 4, 20);
         app.state.view.terminal_area = Rect::new(4, 0, 80, 20);
@@ -1145,8 +1283,8 @@ mod tests {
             terminal.detected_agent = Some(Agent::Claude);
             terminal.state = state;
         };
-        set_state(&mut app, 0, first_pane, AgentState::Working);
-        set_state(&mut app, 1, second_pane, AgentState::Blocked);
+        set_state(&mut app, 0, first_pane, AgentState::Blocked);
+        set_state(&mut app, 1, second_pane, AgentState::Working);
 
         let (_, _, detail_area) =
             crate::ui::collapsed_sidebar_sections(app.state.view.sidebar_rect);

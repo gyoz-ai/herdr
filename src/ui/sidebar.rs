@@ -132,6 +132,10 @@ fn agent_panel_entries_with_runtimes(
 ) -> Vec<AgentPanelEntry> {
     let mut entries = collect_agent_panel_entries_with_runtimes(app, terminal_runtimes);
     crate::app::agent_view::apply_agent_view(app, &mut entries);
+    entries.retain(|entry| {
+        !app.agent_panel_hidden
+            .contains(&(entry.pane_id, entry.subagent_index))
+    });
     entries
 }
 

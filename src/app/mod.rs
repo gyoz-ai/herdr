@@ -638,6 +638,7 @@ impl App {
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
             agent_panel_scope,
             agent_panel_subagents: config.ui.agent_panel_subagents,
+            agent_panel_hidden: HashSet::new(),
             next_agent_state_change_seq: 0,
             mouse_capture: config.ui.mouse_capture,
             copy_on_select: config.ui.copy_on_select,
