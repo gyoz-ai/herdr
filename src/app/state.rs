@@ -1226,7 +1226,7 @@ pub enum ContextMenuKind {
     Agent {
         ws_idx: usize,
         pane_id: PaneId,
-        subagent_index: Option<u32>,
+        subagent_seq: Option<u32>,
     },
 }
 

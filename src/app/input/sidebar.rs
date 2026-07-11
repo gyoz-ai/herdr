@@ -354,12 +354,12 @@ impl AppState {
 
         let detail_idx = (row - detail_content_area.y) as usize;
         let details = crate::ui::agent_panel_entries(self);
-        let detail = details.get(detail_idx)?;
+        let detail = details.get(detail_idx).filter(|detail| !detail.is_title_header)?;
         Some((
             detail.ws_idx,
             detail.tab_idx,
             detail.pane_id,
-            detail.subagent_index,
+            detail.subagent_seq,
         ))
     }
 
@@ -461,11 +461,14 @@ impl AppState {
                 break;
             }
             if row >= row_y && row < row_y.saturating_add(height) {
+                if detail.is_title_header {
+                    return None;
+                }
                 return Some((
                     detail.ws_idx,
                     detail.tab_idx,
                     detail.pane_id,
-                    detail.subagent_index,
+                    detail.subagent_seq,
                 ));
             }
             row_y = row_y
@@ -950,7 +953,7 @@ mod tests {
             ContextMenuKind::Agent {
                 ws_idx: 0,
                 pane_id: pane,
-                subagent_index: Some(2),
+                subagent_seq: Some(2),
             }
         );
         assert_eq!(menu.items(), ["Remove from list", "Stop agent"]);
@@ -979,7 +982,7 @@ mod tests {
             kind: ContextMenuKind::Agent {
                 ws_idx: 0,
                 pane_id: pane,
-                subagent_index: None,
+                subagent_seq: None,
             },
             x: 2,
             y: 2,
@@ -988,6 +991,36 @@ mod tests {
         app.apply_context_menu_action_via_api(menu, 1);
 
         assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b"));
+        assert!(rx.try_recv().is_err());
+        assert_ne!(app.state.mode, Mode::ContextMenu);
+    }
+
+    #[tokio::test]
+    async fn stop_agent_menu_action_sends_multi_digit_seq_stop_sequence() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane = ws.tabs[0].root_pane;
+        let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
+        ws.tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::ContextMenu;
+
+        let menu = ContextMenuState {
+            kind: ContextMenuKind::Agent {
+                ws_idx: 0,
+                pane_id: pane,
+                subagent_seq: Some(12),
+            },
+            x: 2,
+            y: 2,
+            list: MenuListState::new(0),
+        };
+        app.apply_context_menu_action_via_api(menu, 1);
+
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;12K"));
         assert!(rx.try_recv().is_err());
         assert_ne!(app.state.mode, Mode::ContextMenu);
     }
@@ -1017,7 +1050,7 @@ mod tests {
             kind: ContextMenuKind::Agent {
                 ws_idx: 0,
                 pane_id: pane,
-                subagent_index: None,
+                subagent_seq: None,
             },
             x: 2,
             y: 2,

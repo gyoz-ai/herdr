@@ -717,8 +717,8 @@ impl App {
 
     fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId, Option<u32>)> {
         let entries = crate::ui::agent_panel_entries(&self.state);
-        let target = entries.get(idx)?;
-        Some((target.ws_idx, target.pane_id, target.subagent_index))
+        let target = entries.get(idx).filter(|entry| !entry.is_title_header)?;
+        Some((target.ws_idx, target.pane_id, target.subagent_seq))
     }
 
     fn relative_agent_entry(
@@ -737,15 +737,27 @@ impl App {
         let current_idx = entries
             .iter()
             .position(|entry| Some(entry.pane_id) == focused);
-        let next_idx = match (current_idx, forward) {
+        let mut next_idx = match (current_idx, forward) {
             (Some(idx), true) => (idx + 1) % entries.len(),
             (Some(0), false) => entries.len() - 1,
             (Some(idx), false) => idx - 1,
             (None, true) => 0,
             (None, false) => entries.len() - 1,
         };
+        for _ in 0..entries.len() {
+            if !entries[next_idx].is_title_header {
+                break;
+            }
+            next_idx = if forward {
+                (next_idx + 1) % entries.len()
+            } else if next_idx == 0 {
+                entries.len() - 1
+            } else {
+                next_idx - 1
+            };
+        }
         let target = entries.get(next_idx)?;
-        Some((next_idx, target.ws_idx, target.pane_id, target.subagent_index))
+        Some((next_idx, target.ws_idx, target.pane_id, target.subagent_seq))
     }
 
     fn pass_through_key_to_focused_pane(&mut self, key: TerminalKey) -> bool {

@@ -38,7 +38,10 @@ pub(crate) struct AgentPanelEntry {
     pub last_agent_state_change_seq: Option<u64>,
     pub state_labels: std::collections::HashMap<String, String>,
     pub tokens: std::collections::HashMap<String, String>,
-    pub subagent_index: Option<u32>,
+    pub subagent_seq: Option<u32>,
+    pub is_focused: bool,
+    pub is_title_header: bool,
+    pub session_title: Option<String>,
 }
 
 fn sidebar_section_heights(total_h: u16, split_ratio: f32) -> (u16, u16) {
@@ -134,9 +137,13 @@ fn agent_panel_entries_with_runtimes(
     crate::app::agent_view::apply_agent_view(app, &mut entries);
     entries.retain(|entry| {
         !app.agent_panel_hidden
-            .contains(&(entry.pane_id, entry.subagent_index))
+            .contains(&(entry.pane_id, entry.subagent_seq))
     });
-    entries
+    if app.agent_panel_subagents && app.agent_panel_scope == AgentPanelScope::Space {
+        group_agent_panel_entries_by_title(entries)
+    } else {
+        entries
+    }
 }
 
 fn collect_agent_panel_entries_with_runtimes(
@@ -183,8 +190,8 @@ fn collect_agent_panel_entries_with_runtimes(
                 let mut sources: Vec<_> = terminal.subagent_reports.keys().collect();
                 sources.sort();
                 for source in sources {
-                    let mut subagents: Vec<_> =
-                        terminal.subagent_reports[source].entries.iter().collect();
+                    let report = &terminal.subagent_reports[source];
+                    let mut subagents: Vec<_> = report.entries.iter().collect();
                     subagents.sort_by_key(|subagent| subagent.agent_seq);
                     for subagent in subagents {
                         entries.push(AgentPanelEntry {
@@ -207,7 +214,10 @@ fn collect_agent_panel_entries_with_runtimes(
                             last_agent_state_change_seq: detail.last_agent_state_change_seq,
                             state_labels: HashMap::new(),
                             tokens: HashMap::new(),
-                            subagent_index: Some(subagent.agent_seq),
+                            subagent_seq: Some(subagent.agent_seq),
+                            is_focused: report.focused_agent_seq == Some(subagent.agent_seq),
+                            is_title_header: false,
+                            session_title: report.session_title.clone(),
                         });
                     }
                 }
@@ -234,12 +244,86 @@ fn collect_agent_panel_entries_with_runtimes(
                     last_agent_state_change_seq: detail.last_agent_state_change_seq,
                     state_labels: detail.state_labels,
                     tokens: detail.tokens,
-                    subagent_index: None,
+                    subagent_seq: None,
+                    is_focused: false,
+                    is_title_header: false,
+                    session_title: None,
                 });
             }
         }
     }
     entries
+}
+
+fn agent_panel_title_header(
+    pane_id: crate::layout::PaneId,
+    ws_idx: usize,
+    tab_idx: usize,
+    title: &str,
+) -> AgentPanelEntry {
+    AgentPanelEntry {
+        ws_idx,
+        tab_idx,
+        pane_id,
+        primary_label: title.to_string(),
+        primary_tab_label: None,
+        pane_label: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_label: None,
+        agent_kind_label: None,
+        agent: None,
+        state: AgentState::Unknown,
+        seen: true,
+        last_agent_state_change_seq: None,
+        state_labels: HashMap::new(),
+        tokens: HashMap::new(),
+        subagent_seq: None,
+        is_focused: false,
+        is_title_header: true,
+        session_title: Some(title.to_string()),
+    }
+}
+
+fn group_agent_panel_entries_by_title(entries: Vec<AgentPanelEntry>) -> Vec<AgentPanelEntry> {
+    let mut group_order: Vec<(crate::layout::PaneId, String)> = Vec::new();
+    for entry in &entries {
+        if let Some(title) = &entry.session_title {
+            let key = (entry.pane_id, title.clone());
+            if !group_order.contains(&key) {
+                group_order.push(key);
+            }
+        }
+    }
+    if group_order.is_empty() {
+        return entries;
+    }
+
+    let mut slots: Vec<Option<AgentPanelEntry>> = entries.into_iter().map(Some).collect();
+    let mut out = Vec::with_capacity(slots.len() + group_order.len());
+    for (pane_id, title) in &group_order {
+        let representative = slots
+            .iter()
+            .flatten()
+            .find(|entry| {
+                entry.pane_id == *pane_id && entry.session_title.as_deref() == Some(title.as_str())
+            })
+            .map(|entry| (entry.ws_idx, entry.tab_idx));
+        let Some((ws_idx, tab_idx)) = representative else {
+            continue;
+        };
+        out.push(agent_panel_title_header(*pane_id, ws_idx, tab_idx, title));
+        for slot in slots.iter_mut() {
+            let matches = slot.as_ref().is_some_and(|entry| {
+                entry.pane_id == *pane_id && entry.session_title.as_deref() == Some(title.as_str())
+            });
+            if matches {
+                out.push(slot.take().unwrap());
+            }
+        }
+    }
+    out.extend(slots.into_iter().flatten());
+    out
 }
 
 pub(super) fn agent_panel_status_key(state: AgentState, seen: bool) -> &'static str {
@@ -1430,6 +1514,25 @@ fn render_agent_detail(
     let mut row_y = body.y;
     let body_bottom = body.y + body.height;
     for (index, detail) in details.iter().enumerate().skip(scroll) {
+        if detail.is_title_header {
+            if row_y >= body_bottom {
+                break;
+            }
+            let header_line = Line::from(vec![Span::styled(
+                format!(" {}", detail.primary_label),
+                Style::default().fg(p.overlay1).add_modifier(Modifier::BOLD),
+            )]);
+            frame.render_widget(
+                Paragraph::new(header_line),
+                Rect::new(body.x, row_y, body.width, 1),
+            );
+            row_y += 1;
+            row_y += 1;
+            if row_y < body_bottom {
+                row_y += 1;
+            }
+            continue;
+        }
         let label_color = state_label_color(detail.state, detail.seen, p);
         let rows = resolved_agent_rows(app, detail);
         let height = (rows.len().max(1) as u16).min(body.height);
@@ -1437,18 +1540,22 @@ fn render_agent_detail(
             break;
         }
 
-        let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
-        let row_style = if is_active {
+        let is_highlighted = if detail.subagent_seq.is_some() {
+            detail.is_focused
+        } else {
+            app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id)
+        };
+        let row_style = if is_highlighted {
             Style::default().bg(p.surface_dim)
         } else {
             Style::default()
         };
-        let name_style = if is_active {
+        let name_style = if is_highlighted {
             Style::default().fg(p.text).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(p.subtext0).add_modifier(Modifier::BOLD)
         };
-        let status_style = if is_active {
+        let status_style = if is_highlighted {
             Style::default().fg(label_color)
         } else {
             Style::default().fg(label_color).add_modifier(Modifier::DIM)
@@ -1457,7 +1564,7 @@ fn render_agent_detail(
         let state_icon = agent_icon(detail.state, detail.seen, app.spinner_tick, p);
 
         for (row_index, resolved) in rows.iter().take(height as usize).enumerate() {
-            let indent = if detail.subagent_index.is_some() && row_index == 0 {
+            let indent = if detail.subagent_seq.is_some() && row_index == 0 {
                 "\u{2514} "
             } else {
                 ""
@@ -2086,18 +2193,170 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(entries[0].primary_label, "mapping code");
         assert_eq!(entries[0].agent_label.as_deref(), Some("explorer"));
         assert_eq!(entries[0].state, AgentState::Working);
-        assert_eq!(entries[0].subagent_index, Some(0));
+        assert_eq!(entries[0].subagent_seq, Some(0));
         assert_eq!(entries[0].pane_id, first_pane);
         assert_eq!(entries[1].primary_label, "reviewer");
         assert_eq!(entries[1].agent_label.as_deref(), Some("reviewer"));
         assert_eq!(entries[1].state, AgentState::Idle);
-        assert_eq!(entries[1].subagent_index, Some(1));
+        assert_eq!(entries[1].subagent_seq, Some(1));
 
         app.agent_panel_subagents = false;
         let entries = agent_panel_entries(&app);
         assert_eq!(entries.len(), 2);
-        assert!(entries.iter().all(|entry| entry.subagent_index.is_none()));
+        assert!(entries.iter().all(|entry| entry.subagent_seq.is_none()));
         assert_eq!(entries[0].primary_label, "one");
+    }
+
+    #[test]
+    fn subagent_row_is_highlighted_only_when_agent_seq_matches_focused_agent_seq() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("one")];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_subagents = true;
+        let pane = app.workspaces[0].tabs[0].root_pane;
+        let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+            .attached_terminal_id
+            .clone();
+        app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Pi);
+        assert!(app.terminals.get_mut(&terminal_id).unwrap().set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![
+                SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    agent_seq: 2,
+                },
+                SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "reviewer".into(),
+                    state: AgentState::Idle,
+                    description: None,
+                    agent_seq: 1,
+                },
+            ],
+            Some(1),
+            None,
+        ));
+
+        let area = Rect::new(0, 0, 30, 20);
+        let runtimes = TerminalRuntimeRegistry::new();
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+            .expect("test terminal should initialize");
+        terminal
+            .draw(|frame| render_agent_detail(&app, &runtimes, frame, area))
+            .expect("agent panel should render");
+
+        let metrics = agent_panel_scroll_metrics(&app, area);
+        let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+        let buffer = terminal.backend().buffer();
+
+        assert_eq!(
+            buffer[(body.x, body.y)].style().bg,
+            Some(app.palette.surface_dim)
+        );
+        assert_ne!(
+            buffer[(body.x, body.y + 3)].style().bg,
+            Some(app.palette.surface_dim)
+        );
+    }
+
+    #[test]
+    fn subagent_entries_group_by_session_title_with_untitled_panes_ungrouped() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = Workspace::test_new("one");
+        let first_pane = workspace.tabs[0].root_pane;
+        let second_pane = workspace.test_split(Direction::Horizontal);
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_subagents = true;
+        app.agent_panel_scope = AgentPanelScope::Space;
+
+        for pane in [first_pane, second_pane] {
+            let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Pi);
+        }
+
+        let first_terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app.terminals.get_mut(&first_terminal_id).unwrap().set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![
+                SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    agent_seq: 1,
+                },
+                SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "reviewer".into(),
+                    state: AgentState::Idle,
+                    description: None,
+                    agent_seq: 2,
+                },
+            ],
+            None,
+            Some("fix login bug".into()),
+        ));
+
+        let second_terminal_id = app.workspaces[0].tabs[0].panes[&second_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app.terminals.get_mut(&second_terminal_id).unwrap().set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![SubagentEntryState {
+                id: "c".into(),
+                agent_label: "builder".into(),
+                state: AgentState::Idle,
+                description: None,
+                agent_seq: 5,
+            }],
+            None,
+            None,
+        ));
+
+        let entries = agent_panel_entries(&app);
+
+        let header_idx = entries
+            .iter()
+            .position(|entry| entry.is_title_header)
+            .expect("titled pane should produce a group header");
+        assert_eq!(entries[header_idx].primary_label, "fix login bug");
+        assert_eq!(
+            entries[header_idx + 1].agent_label.as_deref(),
+            Some("explorer")
+        );
+        assert_eq!(entries[header_idx + 1].state, AgentState::Working);
+        assert_eq!(
+            entries[header_idx + 2].agent_label.as_deref(),
+            Some("reviewer")
+        );
+        assert_eq!(entries[header_idx + 2].state, AgentState::Idle);
+
+        assert_eq!(
+            entries.iter().filter(|entry| entry.is_title_header).count(),
+            1
+        );
+
+        let untitled = entries
+            .iter()
+            .find(|entry| entry.agent_label.as_deref() == Some("builder"))
+            .expect("untitled pane's subagent should still be listed");
+        assert!(!untitled.is_title_header);
+        assert!(untitled.session_title.is_none());
     }
 
     #[test]

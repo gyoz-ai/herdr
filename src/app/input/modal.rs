@@ -1292,27 +1292,27 @@ impl App {
             (
                 ContextMenuKind::Agent {
                     pane_id,
-                    subagent_index,
+                    subagent_seq,
                     ..
                 },
                 Some("Remove from list"),
             ) => {
                 self.state
                     .agent_panel_hidden
-                    .insert((pane_id, subagent_index));
+                    .insert((pane_id, subagent_seq));
                 leave_modal(&mut self.state);
             }
             (
                 ContextMenuKind::Agent {
                     ws_idx,
                     pane_id,
-                    subagent_index,
+                    subagent_seq,
                 },
                 Some("Stop agent"),
             ) => {
-                let payload = match subagent_index {
-                    Some(index) if index == 0 || index > 9 => None,
-                    Some(index) => Some(Bytes::from(format!("\x1b[>8365;{}K", index))),
+                let payload = match subagent_seq {
+                    Some(seq) if seq == 0 => None,
+                    Some(seq) => Some(Bytes::from(format!("\x1b[>8365;{}K", seq))),
                     None => Some(Bytes::from_static(b"\x1b")),
                 };
                 if let (Some(payload), Some(runtime)) =

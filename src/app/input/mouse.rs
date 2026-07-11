@@ -1046,14 +1046,14 @@ impl AppState {
                         list: MenuListState::new(0),
                     });
                     self.mode = Mode::ContextMenu;
-                } else if let Some((ws_idx, _tab_idx, pane_id, subagent_index)) =
+                } else if let Some((ws_idx, _tab_idx, pane_id, subagent_seq)) =
                     self.agent_detail_target_at(mouse.row)
                 {
                     self.context_menu = Some(ContextMenuState {
                         kind: ContextMenuKind::Agent {
                             ws_idx,
                             pane_id,
-                            subagent_index,
+                            subagent_seq,
                         },
                         x: mouse.column,
                         y: mouse.row,

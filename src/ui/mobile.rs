@@ -1173,7 +1173,10 @@ mod tests {
             last_agent_state_change_seq: None,
             state_labels: std::collections::HashMap::new(),
             tokens: std::collections::HashMap::new(),
-            subagent_index: None,
+            subagent_seq: None,
+            is_focused: false,
+            is_title_header: false,
+            session_title: None,
         }
     }
 
