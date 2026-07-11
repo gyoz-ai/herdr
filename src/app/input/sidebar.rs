@@ -419,22 +419,6 @@ impl AppState {
         best.map(|(insert_idx, _)| insert_idx)
     }
 
-    pub(super) fn on_agent_panel_sort_toggle(&self, col: u16, row: u16) -> bool {
-        if self.sidebar_collapsed || self.agent_view_override.is_some() {
-            return false;
-        }
-
-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
-            self.view.sidebar_rect,
-            self.sidebar_section_split,
-        );
-        let rect = crate::ui::agent_panel_toggle_rect(detail_area, self.agent_panel_sort);
-        rect.width > 0
-            && col >= rect.x
-            && col < rect.x + rect.width
-            && row >= rect.y
-            && row < rect.y + rect.height
-    }
     pub(super) fn agent_detail_target_at(
         &self,
         row: u16,
@@ -538,8 +522,7 @@ mod tests {
     use crate::ui::{agent_panel_body_rect, agent_panel_scroll_metrics, should_show_scrollbar};
     use crate::{
         app::state::{
-            AgentPanelScope, AgentPanelSort, ContextMenuKind, ContextMenuState, DragTarget,
-            MenuListState, Mode,
+            AgentPanelScope, ContextMenuKind, ContextMenuState, DragTarget, MenuListState, Mode,
         },
         config::SidebarCollapsedModeConfig,
         detect::{Agent, AgentState},
@@ -914,30 +897,6 @@ mod tests {
             app.state.agent_detail_target_at(body.y),
             Some((0, 0, first_pane, None))
         );
-    }
-
-    #[test]
-    fn clicking_agent_panel_toggle_switches_sort() {
-        let mut app = app_for_mouse_test();
-        app.state.workspaces = vec![Workspace::test_new("test")];
-        app.state.active = Some(0);
-        app.state.selected = 0;
-        app.state.mode = Mode::Terminal;
-        app.state.agent_panel_scroll = 3;
-
-        let (_, detail_area) = crate::ui::expanded_sidebar_sections(
-            app.state.view.sidebar_rect,
-            app.state.sidebar_section_split,
-        );
-        let toggle = crate::ui::agent_panel_toggle_rect(detail_area, app.state.agent_panel_sort);
-        app.handle_mouse(mouse(
-            MouseEventKind::Down(MouseButton::Left),
-            toggle.x,
-            toggle.y,
-        ));
-
-        assert_eq!(app.state.agent_panel_sort, AgentPanelSort::Priority);
-        assert_eq!(app.state.agent_panel_scroll, 0);
     }
 
     #[test]

@@ -90,24 +90,6 @@ pub enum ToastClipboardPosition {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
 #[serde(rename_all = "lowercase")]
-pub enum AgentPanelSortConfig {
-    #[default]
-    #[serde(alias = "workspaces")]
-    Spaces,
-    Priority,
-}
-
-impl AgentPanelSortConfig {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Spaces => "spaces",
-            Self::Priority => "priority",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum AgentPanelScopeConfig {
     #[default]
     #[serde(alias = "current")]
@@ -821,8 +803,6 @@ pub struct UiConfig {
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
-    /// Agent sidebar ordering. Saved values are "spaces" or "priority". Default: "spaces".
-    pub agent_panel_sort: AgentPanelSortConfig,
     /// Expanded sidebar row composition.
     pub sidebar: SidebarConfig,
     pub agent_panel_scope: AgentPanelScopeConfig,
@@ -1021,7 +1001,6 @@ impl Default for UiConfig {
             pane_gaps: true,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
-            agent_panel_sort: AgentPanelSortConfig::Spaces,
             sidebar: SidebarConfig::default(),
             agent_panel_scope: AgentPanelScopeConfig::Space,
             agent_panel_subagents: false,
@@ -1216,36 +1195,6 @@ resume_agents_on_restore = false
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert!(!config.session.resume_agents_on_restore);
-    }
-
-    #[test]
-    fn agent_panel_sort_config_parses_alias_and_defaults() {
-        assert_eq!(
-            Config::default().ui.agent_panel_sort,
-            AgentPanelSortConfig::Spaces
-        );
-
-        let toml = r#"
-[ui]
-agent_panel_sort = "priority"
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Priority);
-
-        let toml = r#"
-[ui]
-agent_panel_sort = "workspaces"
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
-
-        let toml = r#"
-[ui]
-agent_panel_scope = "current"
-"#;
-        let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.ui.agent_panel_sort, AgentPanelSortConfig::Spaces);
-        assert_eq!(config.ui.agent_panel_scope, AgentPanelScopeConfig::Space);
     }
 
     #[test]

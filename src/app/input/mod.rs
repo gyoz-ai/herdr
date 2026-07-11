@@ -320,7 +320,6 @@ impl App {
             self.focus_pane_before_mouse_press(mouse);
         }
 
-        let previous_agent_panel_sort = self.state.agent_panel_sort;
         let previous_settings_section = self.state.settings.section;
         if !handled_pane_double_click {
             if let Some(action) = self.state.handle_mouse(&mut self.terminal_runtimes, mouse) {
@@ -397,9 +396,6 @@ impl App {
             && self.state.settings.section == crate::app::state::SettingsSection::Integrations
         {
             self.refresh_integration_recommendations();
-        }
-        if self.state.agent_panel_sort != previous_agent_panel_sort {
-            self.save_agent_panel_sort(self.state.agent_panel_sort);
         }
 
         if let Some(content) = self.state.request_clipboard_write.take() {

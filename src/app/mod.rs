@@ -242,15 +242,6 @@ fn load_plugin_registry(no_session: bool) -> crate::app::state::InstalledPluginR
         .collect()
 }
 
-fn agent_panel_sort_from_config(
-    sort: crate::config::AgentPanelSortConfig,
-) -> state::AgentPanelSort {
-    match sort {
-        crate::config::AgentPanelSortConfig::Spaces => state::AgentPanelSort::Spaces,
-        crate::config::AgentPanelSortConfig::Priority => state::AgentPanelSort::Priority,
-    }
-}
-
 fn agent_panel_scope_from_config(scope: AgentPanelScopeConfig) -> state::AgentPanelScope {
     match scope {
         AgentPanelScopeConfig::Space => state::AgentPanelScope::Space,
@@ -477,7 +468,6 @@ impl App {
             )
         };
 
-        let agent_panel_sort = agent_panel_sort_from_config(config.ui.agent_panel_sort);
         let agent_panel_scope = agent_panel_scope_from_config(config.ui.agent_panel_scope);
 
         // Validate sidebar bounds before they reach any `u16::clamp(min, max)`
@@ -633,7 +623,6 @@ impl App {
             sidebar_collapsed: config.ui.sidebar_start_collapsed,
             sidebar_collapsed_mode: config.ui.sidebar_collapsed_mode,
             sidebar_section_split,
-            agent_panel_sort,
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
@@ -1462,8 +1451,6 @@ impl App {
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.hide_tab_bar_when_single_tab = config.ui.hide_tab_bar_when_single_tab;
-                self.state.agent_panel_sort =
-                    agent_panel_sort_from_config(config.ui.agent_panel_sort);
                 self.state.sidebar_agents = config.ui.sidebar.agents.clone();
                 self.state.sidebar_spaces = config.ui.sidebar.spaces.clone();
                 self.state.agent_panel_scope =
@@ -2453,17 +2440,6 @@ mod tests {
     }
 
     #[test]
-    fn startup_uses_configured_agent_panel_sort() {
-        let mut config = Config::default();
-        config.ui.agent_panel_sort = crate::config::AgentPanelSortConfig::Priority;
-        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let app = App::new(&config, true, None, api_rx, crate::api::EventHub::default());
-
-        assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
-    }
-
-    #[test]
     fn startup_uses_configured_sidebar_state() {
         let mut config = Config::default();
         config.ui.sidebar_start_collapsed = true;
@@ -2699,7 +2675,7 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             &path,
-            "[terminal]\ndefault_shell = \"nu\"\nshell_mode = \"non_login\"\nnew_cwd = \"home\"\n[keys]\nnew_workspace = \"prefix+m\"\nprefix = \"ctrl+a\"\n[update]\nversion_check = false\nmanifest_check = false\n[ui]\nagent_panel_sort = \"priority\"\nredraw_on_focus_gained = false\ncopy_on_select = false\nright_click_passthrough_modifier = \"ctrl\"\nprompt_new_workspace_name = true\n[ui.toast]\ndelivery = \"herdr\"\n[experimental]\nswitch_ascii_input_source_in_prefix = true\n",
+            "[terminal]\ndefault_shell = \"nu\"\nshell_mode = \"non_login\"\nnew_cwd = \"home\"\n[keys]\nnew_workspace = \"prefix+m\"\nprefix = \"ctrl+a\"\n[update]\nversion_check = false\nmanifest_check = false\n[ui]\nredraw_on_focus_gained = false\ncopy_on_select = false\nright_click_passthrough_modifier = \"ctrl\"\nprompt_new_workspace_name = true\n[ui.toast]\ndelivery = \"herdr\"\n[experimental]\nswitch_ascii_input_source_in_prefix = true\n",
         )
         .unwrap();
         std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
@@ -2744,7 +2720,6 @@ mod tests {
             app.state.toast_config.delivery,
             crate::config::ToastDelivery::Herdr
         );
-        assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
         assert!(!app.state.redraw_on_focus_gained);
         assert!(!app.state.copy_on_select);
         assert!(app.state.prompt_new_workspace_name);
@@ -3277,28 +3252,6 @@ mod tests {
         );
         let content = std::fs::read_to_string(&path).unwrap();
         assert!(content.contains("delivery = \"terminal\""));
-        assert!(app.state.config_diagnostic.is_none());
-
-        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
-    }
-
-    #[test]
-    fn save_agent_panel_sort_persists_then_applies_live_config() {
-        let _guard = config_env_lock().lock().unwrap();
-        let path = temp_config_path("save-agent-panel-sort");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, "onboarding = false\n").unwrap();
-        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
-
-        let mut app = test_app();
-        assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Spaces);
-
-        app.save_agent_panel_sort(state::AgentPanelSort::Priority);
-
-        assert_eq!(app.state.agent_panel_sort, state::AgentPanelSort::Priority);
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("agent_panel_sort = \"priority\""));
         assert!(app.state.config_diagnostic.is_none());
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
