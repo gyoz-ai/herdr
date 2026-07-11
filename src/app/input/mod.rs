@@ -502,14 +502,14 @@ impl App {
         self.focus_pane_internal_via_api(ws_idx, pane_id);
     }
 
-    pub(super) fn send_subagent_deep_focus(&mut self, ws_idx: usize, pane_id: PaneId, index: u32) {
-        if index == 0 || index > 9 {
+    pub(super) fn send_subagent_deep_focus(&mut self, ws_idx: usize, pane_id: PaneId, seq: u32) {
+        if seq == 0 {
             return;
         }
         let Some(runtime) = self.lookup_runtime_sender(ws_idx, pane_id) else {
             return;
         };
-        let _ = runtime.try_send_bytes(Bytes::from(format!("\x1b[>8365;{}F", index)));
+        let _ = runtime.try_send_bytes(Bytes::from(format!("\x1b[>8365;{}F", seq)));
     }
 
     fn handle_modified_url_click(
@@ -891,7 +891,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn send_subagent_deep_focus_skips_double_digit_ordinals() {
+    async fn send_subagent_deep_focus_sends_multi_digit_seq() {
         let mut app = test_app();
         let mut ws = Workspace::test_new("test");
         let pane = ws.tabs[0].root_pane;
@@ -900,8 +900,9 @@ mod tests {
         app.state.workspaces = vec![ws];
         app.state.active = Some(0);
 
-        app.send_subagent_deep_focus(0, pane, 10);
+        app.send_subagent_deep_focus(0, pane, 12);
 
+        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;12F"));
         assert!(rx.try_recv().is_err());
     }
 

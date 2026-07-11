@@ -2913,6 +2913,14 @@
         },
         "PaneReportSubagentsParams": {
           "properties": {
+            "focused_agent_seq": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
             "pane_id": {
               "type": "string"
             },
@@ -2920,6 +2928,12 @@
               "format": "uint64",
               "minimum": 0,
               "type": "integer"
+            },
+            "session_title": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "source": {
               "type": "string"
@@ -3632,6 +3646,11 @@
             "agent": {
               "type": "string"
             },
+            "agent_seq": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
             "description": {
               "type": [
                 "string",
@@ -3641,11 +3660,6 @@
             "id": {
               "type": "string"
             },
-            "index": {
-              "format": "uint32",
-              "minimum": 0,
-              "type": "integer"
-            },
             "status": {
               "$ref": "#/schemas/request/$defs/SubagentStatus"
             }
@@ -3654,7 +3668,7 @@
             "id",
             "agent",
             "status",
-            "index"
+            "agent_seq"
           ],
           "type": "object"
         },

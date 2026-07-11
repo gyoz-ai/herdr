@@ -120,6 +120,8 @@ pub enum AppEvent {
         source: String,
         seq: u64,
         subagents: Vec<SubagentEntryState>,
+        focused_agent_seq: Option<u32>,
+        session_title: Option<String>,
     },
     /// A new version is available through the active installation manager.
     UpdateReady {

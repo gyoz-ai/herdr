@@ -2812,10 +2812,12 @@ impl AppState {
                 source,
                 seq,
                 subagents,
+                focused_agent_seq,
+                session_title,
             } => self
                 .update_terminal_state(pane_id, |terminal| {
                     terminal
-                        .set_subagents_report(&source, seq, subagents)
+                        .set_subagents_report(&source, seq, subagents, focused_agent_seq, session_title)
                         .then(TerminalStateMutation::default)
                 })
                 .into_iter()

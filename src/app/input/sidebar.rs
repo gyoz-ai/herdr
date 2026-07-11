@@ -735,16 +735,18 @@ mod tests {
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 1,
+                    agent_seq: 1,
                 },
                 SubagentEntryState {
                     id: "b".into(),
                     agent_label: "reviewer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 2,
+                    agent_seq: 2,
                 },
             ],
+            None,
+            None,
         ));
 
         let detail_area = app.state.agent_panel_rect();
@@ -916,16 +918,18 @@ mod tests {
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 1,
+                    agent_seq: 1,
                 },
                 SubagentEntryState {
                     id: "b".into(),
                     agent_label: "reviewer".into(),
                     state: AgentState::Working,
                     description: None,
-                    index: 2,
+                    agent_seq: 2,
                 },
             ],
+            None,
+            None,
         ));
 
         let detail_area = app.state.agent_panel_rect();

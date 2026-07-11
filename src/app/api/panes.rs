@@ -1509,7 +1509,7 @@ impl App {
                     SubagentStatus::Failed => AgentState::Blocked,
                 },
                 description: normalize_presentation_text(entry.description),
-                index: entry.index,
+                agent_seq: entry.agent_seq,
             });
         }
         self.handle_internal_event(AppEvent::SubagentsReported {
@@ -1517,6 +1517,8 @@ impl App {
             source,
             seq: params.seq,
             subagents,
+            focused_agent_seq: params.focused_agent_seq,
+            session_title: normalize_presentation_text(params.session_title),
         });
 
         encode_success(id, ResponseResult::Ok {})
@@ -4078,6 +4080,8 @@ mod tests {
             source: "custom:omp-subagents".into(),
             seq,
             subagents,
+            focused_agent_seq: None,
+            session_title: None,
         }
     }
 
@@ -4110,7 +4114,7 @@ mod tests {
                 agent: "task".into(),
                 status: SubagentStatus::Working,
                 description: None,
-                index,
+                agent_seq: index,
             })
             .collect();
 
@@ -4128,7 +4132,7 @@ mod tests {
             agent: "  ".into(),
             status: SubagentStatus::Working,
             description: None,
-            index: 0,
+            agent_seq: 0,
         }];
 
         let response =
@@ -4152,7 +4156,7 @@ mod tests {
                     agent: "explorer".into(),
                     status: SubagentStatus::Done,
                     description: Some("  mapping the codebase  ".into()),
-                    index: 3,
+                    agent_seq: 3,
                 }],
             ),
         );
@@ -4168,7 +4172,7 @@ mod tests {
             report.entries[0].description.as_deref(),
             Some("mapping the codebase")
         );
-        assert_eq!(report.entries[0].index, 3);
+        assert_eq!(report.entries[0].agent_seq, 3);
 
         let response = app.handle_pane_report_subagents(
             "req2".into(),
@@ -4180,7 +4184,7 @@ mod tests {
                     agent: "stale".into(),
                     status: SubagentStatus::Failed,
                     description: None,
-                    index: 0,
+                    agent_seq: 0,
                 }],
             ),
         );
@@ -4207,7 +4211,7 @@ mod tests {
                     agent: "task".into(),
                     status: SubagentStatus::Working,
                     description: None,
-                    index: 0,
+                    agent_seq: 0,
                 }],
             ),
         );
@@ -4220,4 +4224,30 @@ mod tests {
 
         assert!(stored_subagent_report(&app, pane_id).is_none());
     }
+
+    #[test]
+        fn pane_report_subagents_threads_focused_agent_seq_and_session_title() { let (mut app, pane_id) = app_with_test_workspace();
+    
+        let mut params = subagents_params(
+            pane_id.clone(),
+            1,
+            vec![SubagentEntry {
+                id: "a".into(),
+                agent: "task".into(),
+                status: SubagentStatus::Working,
+                description: None,
+                agent_seq: 12,
+            }],
+        );
+        params.focused_agent_seq = Some(12);
+        params.session_title = Some("fix login bug".into());
+    
+        let response = app.handle_pane_report_subagents("req".into(), params);
+        let success: SuccessResponse = serde_json::from_str(&response).unwrap();
+        assert_eq!(success.result, ResponseResult::Ok {});
+    
+        let pane_id = app.state.workspaces[0].tabs[0].root_pane;
+        let report = stored_subagent_report(&app, pane_id).unwrap();
+        assert_eq!(report.focused_agent_seq, Some(12));
+        assert_eq!(report.session_title.as_deref(), Some("fix login bug")); }
 }

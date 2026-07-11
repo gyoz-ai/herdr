@@ -406,7 +406,7 @@ pub struct SubagentEntry {
     pub status: SubagentStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub index: u32,
+    pub agent_seq: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -416,6 +416,10 @@ pub struct PaneReportSubagentsParams {
     pub seq: u64,
     #[serde(default)]
     pub subagents: Vec<SubagentEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focused_agent_seq: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

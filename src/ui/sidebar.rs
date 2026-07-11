@@ -185,7 +185,7 @@ fn collect_agent_panel_entries_with_runtimes(
                 for source in sources {
                     let mut subagents: Vec<_> =
                         terminal.subagent_reports[source].entries.iter().collect();
-                    subagents.sort_by_key(|subagent| subagent.index);
+                    subagents.sort_by_key(|subagent| subagent.agent_seq);
                     for subagent in subagents {
                         entries.push(AgentPanelEntry {
                             ws_idx,
@@ -207,7 +207,7 @@ fn collect_agent_panel_entries_with_runtimes(
                             last_agent_state_change_seq: detail.last_agent_state_change_seq,
                             state_labels: HashMap::new(),
                             tokens: HashMap::new(),
-                            subagent_index: Some(subagent.index),
+                            subagent_index: Some(subagent.agent_seq),
                         });
                     }
                 }
@@ -2066,16 +2066,18 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                         agent_label: "reviewer".into(),
                         state: AgentState::Idle,
                         description: None,
-                        index: 1,
+                        agent_seq: 1,
                     },
                     SubagentEntryState {
                         id: "a".into(),
                         agent_label: "explorer".into(),
                         state: AgentState::Working,
                         description: Some("mapping code".into()),
-                        index: 0,
+                        agent_seq: 0,
                     },
                 ],
+                None,
+                None,
             ));
 
         let entries = agent_panel_entries(&app);
@@ -2124,8 +2126,10 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: Some("mapping code".into()),
-                    index: 0,
+                    agent_seq: 0,
                 }],
+                None,
+                None,
             ));
 
         let entries = agent_panel_entries(&app);

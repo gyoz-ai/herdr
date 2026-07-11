@@ -117,13 +117,15 @@ pub struct SubagentEntryState {
     pub agent_label: String,
     pub state: AgentState,
     pub description: Option<String>,
-    pub index: u32,
+    pub agent_seq: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SubagentReport {
     pub seq: u64,
     pub entries: Vec<SubagentEntryState>,
+    pub focused_agent_seq: Option<u32>,
+    pub session_title: Option<String>,
 }
 
 /// Pure state for a server-owned terminal.
@@ -1626,6 +1628,8 @@ impl TerminalState {
         source: &str,
         seq: u64,
         entries: Vec<SubagentEntryState>,
+        focused_agent_seq: Option<u32>,
+        session_title: Option<String>,
     ) -> bool {
         if self
             .subagent_reports
@@ -1637,8 +1641,15 @@ impl TerminalState {
         if entries.is_empty() {
             return self.subagent_reports.remove(source).is_some();
         }
-        self.subagent_reports
-            .insert(source.to_string(), SubagentReport { seq, entries });
+        self.subagent_reports.insert(
+            source.to_string(),
+            SubagentReport {
+                seq,
+                entries,
+                focused_agent_seq,
+                session_title,
+            },
+        );
         true
     }
 
@@ -4054,8 +4065,10 @@ mod tests {
                 agent_label: "task".into(),
                 state: AgentState::Working,
                 description: Some("first".into()),
-                index: 0,
+                agent_seq: 0,
             }],
+            None,
+            None,
         ));
 
         assert!(!terminal.set_subagents_report(
@@ -4066,10 +4079,12 @@ mod tests {
                 agent_label: "task".into(),
                 state: AgentState::Idle,
                 description: None,
-                index: 1,
+                agent_seq: 1,
             }],
+            None,
+            None,
         ));
-        assert!(!terminal.set_subagents_report("custom:omp-subagents", 9, vec![]));
+        assert!(!terminal.set_subagents_report("custom:omp-subagents", 9, vec![], None, None));
 
         let report = &terminal.subagent_reports["custom:omp-subagents"];
         assert_eq!(report.seq, 10);
@@ -4089,14 +4104,16 @@ mod tests {
                 agent_label: "task".into(),
                 state: AgentState::Working,
                 description: None,
-                index: 0,
+                agent_seq: 0,
             }],
+            None,
+            None,
         ));
 
-        assert!(terminal.set_subagents_report("custom:omp-subagents", 2, vec![]));
+        assert!(terminal.set_subagents_report("custom:omp-subagents", 2, vec![], None, None));
 
         assert!(!terminal.subagent_reports.contains_key("custom:omp-subagents"));
-        assert!(!terminal.set_subagents_report("custom:omp-subagents", 3, vec![]));
+        assert!(!terminal.set_subagents_report("custom:omp-subagents", 3, vec![], None, None));
     }
 
     #[test]
@@ -4118,8 +4135,10 @@ mod tests {
                 agent_label: "task".into(),
                 state: AgentState::Working,
                 description: None,
-                index: 0,
+                agent_seq: 0,
             }],
+            None,
+            None,
         ));
         assert!(terminal.set_subagents_report(
             "custom:omp-subagents",
@@ -4129,8 +4148,10 @@ mod tests {
                 agent_label: "task".into(),
                 state: AgentState::Working,
                 description: None,
-                index: 0,
+                agent_seq: 0,
             }],
+            None,
+            None,
         ));
 
         terminal.release_agent("herdr:pi", "pi", None);
@@ -4138,6 +4159,26 @@ mod tests {
         assert!(!terminal.subagent_reports.contains_key("herdr:pi"));
         assert!(terminal.subagent_reports.contains_key("custom:omp-subagents"));
     }
+
+    #[test]
+        fn set_subagents_report_stores_focused_agent_seq_and_session_title() { let mut terminal = test_terminal();
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                agent_seq: 12,
+            }],
+            Some(12),
+            Some("fix login bug".into()),
+        ));
+    
+        let report = &terminal.subagent_reports["custom:omp-subagents"];
+        assert_eq!(report.focused_agent_seq, Some(12));
+        assert_eq!(report.session_title.as_deref(), Some("fix login bug")); }
 
     #[test]
     fn stale_hook_report_sequence_is_ignored_for_same_source() {
