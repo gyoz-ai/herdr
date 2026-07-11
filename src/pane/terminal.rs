@@ -1569,11 +1569,9 @@ impl GhosttyPaneTerminal {
             .terminal
             .mode_get(crate::ghostty::MODE_MOUSE_ALTERNATE_SCROLL)
             .ok()?;
-        let mouse_reporting = core.terminal.mode_get(MODE_MOUSE_ANY_MOTION).ok()?
-            || core.terminal.mode_get(MODE_MOUSE_BUTTON_MOTION).ok()?
-            || core.terminal.mode_get(MODE_MOUSE_PRESS_RELEASE).ok()?
-            || core.terminal.mode_get(MODE_MOUSE_X10).ok()?;
-        Some(if mouse_reporting {
+        let motion_tracking = core.terminal.mode_get(MODE_MOUSE_ANY_MOTION).ok()?
+            || core.terminal.mode_get(MODE_MOUSE_BUTTON_MOTION).ok()?;
+        Some(if motion_tracking {
             crate::pane::WheelRouting::MouseReport
         } else if alternate_screen && mouse_alternate_scroll {
             crate::pane::WheelRouting::AlternateScroll
@@ -4037,6 +4035,17 @@ mod tests {
 
         assert_eq!(encoded.as_deref(), Some(&b"\x1b[<0;12;10m"[..]));
     }
+
+    #[test]
+        fn ghostty_wheel_routing_scrolls_host_scrollback_for_click_tracking_on_main_screen() { let (tx, _rx) = mpsc::channel(4);
+        let mut terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
+        terminal.write(b"\x1b[?1000h\x1b[?1006h");
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+    
+        assert_eq!(
+            pane.wheel_routing(),
+            Some(crate::pane::WheelRouting::HostScroll)
+        ); }
 
     #[test]
     fn ghostty_mouse_drag_encoding_uses_motion_reporting_state() {
