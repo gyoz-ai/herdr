@@ -1561,7 +1561,6 @@ fn render_agent_detail(
                 Rect::new(body.x, row_y, body.width, 1),
             );
             row_y += 1;
-            row_y += 1;
             if row_y < body_bottom {
                 row_y += 1;
             }
@@ -2526,6 +2525,105 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert!(collapsed
             .iter()
             .any(|entry| entry.agent_label.as_deref() == Some("builder")));
+    }
+
+    #[test]
+    fn title_header_rows_occupy_exactly_one_line_plus_separator_expanded_and_collapsed() {
+        let mut app = crate::app::state::AppState::test_new();
+        let mut workspace = Workspace::test_new("one");
+        let first_pane = workspace.tabs[0].root_pane;
+        let second_pane = workspace.test_split(Direction::Horizontal);
+        app.workspaces = vec![workspace];
+        app.ensure_test_terminals();
+        app.active = Some(0);
+        app.selected = 0;
+        app.agent_panel_scope = AgentPanelScope::Space;
+        app.agent_panel_subagents = true;
+
+        for pane in [first_pane, second_pane] {
+            let terminal_id = app.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals.get_mut(&terminal_id).unwrap().detected_agent = Some(Agent::Pi);
+        }
+
+        let first_terminal_id = app.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "a".into(),
+                    agent_label: "explorer".into(),
+                    state: AgentState::Working,
+                    description: None,
+                    agent_seq: 1,
+                }],
+                None,
+                Some("standup notes".into()),
+            ));
+
+        let second_terminal_id = app.workspaces[0].tabs[0].panes[&second_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .terminals
+            .get_mut(&second_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "b".into(),
+                    agent_label: "builder".into(),
+                    state: AgentState::Idle,
+                    description: None,
+                    agent_seq: 1,
+                }],
+                None,
+                Some("standup notes".into()),
+            ));
+
+        let area = Rect::new(0, 0, 30, 20);
+        let runtimes = TerminalRuntimeRegistry::new();
+
+        let render_rows = |app: &crate::app::state::AppState| -> Vec<String> {
+            let metrics = agent_panel_scroll_metrics(app, area);
+            let body = agent_panel_body_rect(area, should_show_scrollbar(metrics));
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height))
+                .expect("test terminal should initialize");
+            terminal
+                .draw(|frame| render_agent_detail(app, &runtimes, frame, area))
+                .expect("agent panel should render");
+            let buffer = terminal.backend().buffer();
+            (0..3)
+                .map(|offset| {
+                    (body.x..body.x + body.width)
+                        .map(|x| buffer[(x, body.y + offset)].symbol())
+                        .collect::<String>()
+                })
+                .collect()
+        };
+
+        let expanded_rows = render_rows(&app);
+        assert!(expanded_rows[0].contains("standup notes"));
+        assert!(expanded_rows[1].trim().is_empty());
+        assert!(expanded_rows[2].contains("explorer"));
+
+        app.agent_panel_collapsed
+            .insert((first_pane, "standup notes".to_string()));
+        app.agent_panel_collapsed
+            .insert((second_pane, "standup notes".to_string()));
+
+        let collapsed_rows = render_rows(&app);
+        assert!(collapsed_rows[0].contains("standup notes (1)"));
+        assert!(collapsed_rows[1].trim().is_empty());
+        assert!(collapsed_rows[2].contains("standup notes (1)"));
     }
 
     #[test]
