@@ -2,8 +2,8 @@ use crate::config::{Keybinds, NewTerminalCwdConfig, SoundConfig, ToastConfig, To
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::layout::{Direction, Rect};
 use ratatui::style::Color;
-use std::hash::{Hash, Hasher};
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 
 use crate::detect::AgentState;
 use crate::layout::{PaneId, PaneInfo, SplitBorder};
@@ -1512,6 +1512,7 @@ pub struct AppState {
     pub agent_panel_scope: AgentPanelScope,
     pub agent_panel_subagents: bool,
     pub agent_panel_hidden: HashSet<(PaneId, Option<u32>)>,
+    pub agent_panel_collapsed: HashSet<(PaneId, String)>,
     pub next_agent_state_change_seq: u64,
     /// Capture mouse input for Herdr's own mouse UI. When false, Herdr only
     /// captures mouse while the focused pane app requests mouse reporting.
@@ -1893,6 +1894,7 @@ impl AppState {
             agent_panel_scope: AgentPanelScope::Space,
             agent_panel_subagents: false,
             agent_panel_hidden: HashSet::new(),
+            agent_panel_collapsed: HashSet::new(),
             next_agent_state_change_seq: 0,
             mouse_capture: true,
             copy_on_select: true,

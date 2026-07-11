@@ -1473,15 +1473,23 @@ impl AppState {
             .active
             .and_then(|idx| self.workspaces.get(idx))
             .and_then(crate::workspace::Workspace::focused_pane_id);
-        let current_idx =
-            focused.and_then(|pane_id| entries.iter().position(|entry| entry.pane_id == pane_id));
-        let target_idx = match (current_idx, forward) {
-            (Some(idx), true) => (idx + 1) % entries.len(),
-            (Some(0), false) => entries.len() - 1,
-            (Some(idx), false) => idx - 1,
-            (None, true) => 0,
-            (None, false) => entries.len() - 1,
-        };
+        let current_idx = focused
+            .and_then(|pane_id| entries.iter().position(|entry| entry.pane_id == pane_id))
+            .unwrap_or(0);
+
+        let mut target_idx = current_idx;
+        for _ in 0..entries.len() {
+            target_idx = if forward {
+                (target_idx + 1) % entries.len()
+            } else if target_idx == 0 {
+                entries.len() - 1
+            } else {
+                target_idx - 1
+            };
+            if !entries[target_idx].is_title_header {
+                break;
+            }
+        }
 
         self.focus_agent_entry(target_idx);
     }
@@ -2817,7 +2825,13 @@ impl AppState {
             } => self
                 .update_terminal_state(pane_id, |terminal| {
                     terminal
-                        .set_subagents_report(&source, seq, subagents, focused_agent_seq, session_title)
+                        .set_subagents_report(
+                            &source,
+                            seq,
+                            subagents,
+                            focused_agent_seq,
+                            session_title,
+                        )
                         .then(TerminalStateMutation::default)
                 })
                 .into_iter()
@@ -3281,8 +3295,9 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::detect::{Agent, AgentState};
     use crate::app::state::AgentPanelScope;
+    use crate::detect::{Agent, AgentState};
+    use crate::terminal::SubagentEntryState;
     use crate::workspace::Workspace;
     use ratatui::layout::Direction;
 
@@ -4081,6 +4096,109 @@ mod tests {
         state.previous_agent();
         assert_eq!(state.active, Some(0));
         assert_eq!(state.workspaces[0].focused_pane_id(), Some(first_second));
+        state.assert_invariants_for_test();
+    }
+
+    #[test]
+    fn next_agent_skips_collapsed_title_group_members() {
+        let mut workspace = Workspace::test_new("one");
+        let hidden_pane = workspace.tabs[0].root_pane;
+        let visible_pane = workspace.test_split(Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(hidden_pane);
+
+        let mut state = AppState::test_new();
+        state.workspaces = vec![workspace];
+        state.ensure_test_terminals();
+        state.active = Some(0);
+        state.selected = 0;
+        state.mode = Mode::Terminal;
+        state.agent_panel_scope = AgentPanelScope::Space;
+        state.agent_panel_subagents = true;
+
+        for pane in [hidden_pane, visible_pane] {
+            let terminal_id = state.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .detected_agent = Some(Agent::Pi);
+        }
+
+        let hidden_terminal_id = state.workspaces[0].tabs[0].panes[&hidden_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(state
+            .terminals
+            .get_mut(&hidden_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![
+                    SubagentEntryState {
+                        id: "a".into(),
+                        agent_label: "explorer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 1,
+                    },
+                    SubagentEntryState {
+                        id: "b".into(),
+                        agent_label: "reviewer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 2,
+                    },
+                ],
+                None,
+                Some("hidden group".into()),
+            ));
+
+        let visible_terminal_id = state.workspaces[0].tabs[0].panes[&visible_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(state
+            .terminals
+            .get_mut(&visible_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "c".into(),
+                    agent_label: "builder".into(),
+                    state: AgentState::Idle,
+                    description: None,
+                    agent_seq: 3,
+                }],
+                None,
+                Some("visible group".into()),
+            ));
+
+        let entries_before = crate::ui::agent_panel_entries(&state);
+        assert!(entries_before
+            .iter()
+            .any(|entry| entry.pane_id == hidden_pane));
+
+        state
+            .agent_panel_collapsed
+            .insert((hidden_pane, "hidden group".to_string()));
+
+        let entries_after = crate::ui::agent_panel_entries(&state);
+        assert!(!entries_after
+            .iter()
+            .any(|entry| entry.pane_id == hidden_pane && !entry.is_title_header));
+
+        for _ in 0..6 {
+            state.next_agent();
+            assert_eq!(state.workspaces[0].focused_pane_id(), Some(visible_pane));
+        }
+        for _ in 0..6 {
+            state.previous_agent();
+            assert_eq!(state.workspaces[0].focused_pane_id(), Some(visible_pane));
+        }
         state.assert_invariants_for_test();
     }
 

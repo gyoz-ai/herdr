@@ -636,6 +636,7 @@ impl App {
             agent_view_override: None,
             sidebar_agents: config.ui.sidebar.agents.clone(),
             sidebar_spaces: config.ui.sidebar.spaces.clone(),
+            agent_panel_collapsed: HashSet::new(),
             agent_panel_scope,
             agent_panel_subagents: config.ui.agent_panel_subagents,
             agent_panel_hidden: HashSet::new(),

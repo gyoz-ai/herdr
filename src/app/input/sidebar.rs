@@ -354,7 +354,9 @@ impl AppState {
 
         let detail_idx = (row - detail_content_area.y) as usize;
         let details = crate::ui::agent_panel_entries(self);
-        let detail = details.get(detail_idx).filter(|detail| !detail.is_title_header)?;
+        let detail = details
+            .get(detail_idx)
+            .filter(|detail| !detail.is_title_header)?;
         Some((
             detail.ws_idx,
             detail.tab_idx,
@@ -478,6 +480,46 @@ impl AppState {
         }
         None
     }
+
+    pub(super) fn agent_panel_header_at(
+        &self,
+        row: u16,
+    ) -> Option<(crate::layout::PaneId, String)> {
+        if self.sidebar_collapsed {
+            return None;
+        }
+
+        let detail_area = self.agent_panel_rect();
+        let metrics = crate::ui::agent_panel_scroll_metrics(self, detail_area);
+        let body = crate::ui::agent_panel_body_rect(
+            detail_area,
+            crate::ui::should_show_scrollbar(metrics),
+        );
+        if body.height < 2 || row < body.y || row >= body.y + body.height {
+            return None;
+        }
+
+        let mut row_y = body.y;
+        for detail in crate::ui::agent_panel_entries(self)
+            .into_iter()
+            .skip(self.agent_panel_scroll)
+        {
+            if row_y.saturating_add(1) >= body.y + body.height {
+                break;
+            }
+            if row == row_y || row == row_y + 1 {
+                if !detail.is_title_header {
+                    return None;
+                }
+                return detail.session_title.map(|title| (detail.pane_id, title));
+            }
+            row_y = row_y.saturating_add(2);
+            if row_y < body.y + body.height {
+                row_y = row_y.saturating_add(1);
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -485,7 +527,7 @@ mod tests {
     use std::fs;
 
     use crossterm::event::{MouseButton, MouseEventKind};
-    use ratatui::layout::Rect;
+    use ratatui::layout::{Direction, Rect};
 
     use super::super::{app_for_mouse_test, capture_snapshot, mouse, unique_temp_path};
     use crate::terminal::{SubagentEntryState, TerminalRuntime};
@@ -894,6 +936,143 @@ mod tests {
         assert_eq!(app.state.agent_panel_scroll, 0);
     }
 
+    #[test]
+    fn clicking_title_header_row_toggles_only_that_groups_collapsed_state() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let first_pane = ws.tabs[0].root_pane;
+        let second_pane = ws.test_split(Direction::Horizontal);
+        app.state.workspaces = vec![ws];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.agent_panel_scope = AgentPanelScope::Space;
+        app.state.agent_panel_subagents = true;
+
+        for pane in [first_pane, second_pane] {
+            let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]
+                .attached_terminal_id
+                .clone();
+            app.state
+                .terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .detected_agent = Some(Agent::Pi);
+        }
+
+        let first_terminal_id = app.state.workspaces[0].tabs[0].panes[&first_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .state
+            .terminals
+            .get_mut(&first_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![
+                    SubagentEntryState {
+                        id: "a".into(),
+                        agent_label: "explorer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 1,
+                    },
+                    SubagentEntryState {
+                        id: "b".into(),
+                        agent_label: "reviewer".into(),
+                        state: AgentState::Working,
+                        description: None,
+                        agent_seq: 2,
+                    },
+                ],
+                None,
+                Some("alpha".into()),
+            ));
+
+        let second_terminal_id = app.state.workspaces[0].tabs[0].panes[&second_pane]
+            .attached_terminal_id
+            .clone();
+        assert!(app
+            .state
+            .terminals
+            .get_mut(&second_terminal_id)
+            .unwrap()
+            .set_subagents_report(
+                "custom:omp-subagents",
+                1,
+                vec![SubagentEntryState {
+                    id: "c".into(),
+                    agent_label: "builder".into(),
+                    state: AgentState::Idle,
+                    description: None,
+                    agent_seq: 5,
+                }],
+                None,
+                Some("beta".into()),
+            ));
+
+        let detail_area = app.state.agent_panel_rect();
+        let metrics = agent_panel_scroll_metrics(&app.state, detail_area);
+        let body = agent_panel_body_rect(detail_area, should_show_scrollbar(metrics));
+        let header_row = body.y;
+
+        let entries = crate::ui::agent_panel_entries(&app.state);
+        assert_eq!(entries[0].pane_id, first_pane);
+        assert!(entries[0].is_title_header);
+        assert!(!app
+            .state
+            .agent_panel_collapsed
+            .contains(&(first_pane, "alpha".to_string())));
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            header_row,
+        ));
+
+        assert!(app
+            .state
+            .agent_panel_collapsed
+            .contains(&(first_pane, "alpha".to_string())));
+        let entries = crate::ui::agent_panel_entries(&app.state);
+        assert!(!entries
+            .iter()
+            .any(|entry| entry.agent_label.as_deref() == Some("explorer")));
+        assert!(!entries
+            .iter()
+            .any(|entry| entry.agent_label.as_deref() == Some("reviewer")));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.agent_label.as_deref() == Some("builder")));
+        let beta_header = entries
+            .iter()
+            .find(|entry| entry.is_title_header && entry.pane_id == second_pane)
+            .expect("other pane's header should be unaffected");
+        assert!(!beta_header.is_collapsed);
+        assert_eq!(app.state.mode, Mode::Terminal);
+
+        app.handle_mouse(mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            2,
+            header_row,
+        ));
+
+        assert!(!app
+            .state
+            .agent_panel_collapsed
+            .contains(&(first_pane, "alpha".to_string())));
+        let entries = crate::ui::agent_panel_entries(&app.state);
+        assert!(entries
+            .iter()
+            .any(|entry| entry.agent_label.as_deref() == Some("explorer")));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.agent_label.as_deref() == Some("reviewer")));
+    }
+
     #[tokio::test]
     async fn right_clicking_subagent_row_opens_agent_context_menu_and_stop_writes_stop_sequence() {
         let mut app = app_for_mouse_test();
@@ -1020,7 +1199,10 @@ mod tests {
         };
         app.apply_context_menu_action_via_api(menu, 1);
 
-        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;12K"));
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            Bytes::from_static(b"\x1b[>8365;12K")
+        );
         assert!(rx.try_recv().is_err());
         assert_ne!(app.state.mode, Mode::ContextMenu);
     }

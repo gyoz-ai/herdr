@@ -875,7 +875,8 @@ mod tests {
 
         assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;1F"));
         assert!(rx.try_recv().is_err());
-    } #[tokio::test]
+    }
+    #[tokio::test]
     async fn send_subagent_deep_focus_skips_ordinal_zero() {
         let mut app = test_app();
         let mut ws = Workspace::test_new("test");
@@ -902,7 +903,10 @@ mod tests {
 
         app.send_subagent_deep_focus(0, pane, 12);
 
-        assert_eq!(rx.try_recv().unwrap(), Bytes::from_static(b"\x1b[>8365;12F"));
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            Bytes::from_static(b"\x1b[>8365;12F")
+        );
         assert!(rx.try_recv().is_err());
     }
 

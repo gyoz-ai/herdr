@@ -715,7 +715,10 @@ impl App {
         Some((ws.active_tab as isize + delta).rem_euclid(ws.tabs.len() as isize) as usize)
     }
 
-    fn agent_entry_target(&self, idx: usize) -> Option<(usize, crate::layout::PaneId, Option<u32>)> {
+    fn agent_entry_target(
+        &self,
+        idx: usize,
+    ) -> Option<(usize, crate::layout::PaneId, Option<u32>)> {
         let entries = crate::ui::agent_panel_entries(&self.state);
         let target = entries.get(idx).filter(|entry| !entry.is_title_header)?;
         Some((target.ws_idx, target.pane_id, target.subagent_seq))
@@ -1869,12 +1872,12 @@ mod tests {
     use super::super::wait_for_file;
     use super::super::{state_with_workspaces, unique_temp_path};
     use super::*;
+    use crate::detect::{Agent, AgentState};
+    use crate::terminal::{SubagentEntryState, TerminalRuntime};
     use crate::{
         app::App, config::Config, input::TerminalKey, terminal::TerminalState, workspace::Workspace,
     };
     use bytes::Bytes;
-    use crate::detect::{Agent, AgentState};
-    use crate::terminal::{SubagentEntryState, TerminalRuntime};
 
     fn mark_worktree_space_member(state: &mut AppState, ws_idx: usize, key: &str) {
         state.workspaces[ws_idx].worktree_space = Some(crate::workspace::WorktreeSpaceMembership {
@@ -1907,7 +1910,9 @@ mod tests {
         let mut app = app_with_test_workspaces(&["one"]);
         let pane = app.state.workspaces[0].tabs[0].root_pane;
         let (runtime, mut rx) = TerminalRuntime::test_with_channel(80, 24);
-        app.state.workspaces[0].tabs[0].runtimes.insert(pane, runtime);
+        app.state.workspaces[0].tabs[0]
+            .runtimes
+            .insert(pane, runtime);
         app.state.agent_panel_subagents = true;
         app.state.view.sidebar_rect = Rect::new(0, 0, 26, 20);
         let terminal_id = app.state.workspaces[0].tabs[0].panes[&pane]

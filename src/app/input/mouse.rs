@@ -618,6 +618,15 @@ impl AppState {
                         return None;
                     }
 
+                    if let Some(key) = self.agent_panel_header_at(mouse.row) {
+                        if self.agent_panel_collapsed.contains(&key) {
+                            self.agent_panel_collapsed.remove(&key);
+                        } else {
+                            self.agent_panel_collapsed.insert(key);
+                        }
+                        return None;
+                    }
+
                     if let Some((ws_idx, _tab_idx, pane_id, deep_focus)) =
                         self.agent_detail_target_at(mouse.row)
                     {

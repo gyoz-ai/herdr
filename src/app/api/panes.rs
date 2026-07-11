@@ -14,13 +14,13 @@ use crate::api::schema::{
     PaneZoomReason, PaneZoomResult, ResponseResult, SubagentStatus,
 };
 use crate::app::actions::{PaneZoomCommand, PaneZoomNoopReason};
-use crate::detect::AgentState;
-use crate::events::AppEvent;
-use crate::terminal::SubagentEntryState;
 use crate::app::App;
 #[cfg(test)]
 use crate::app::Mode;
+use crate::detect::AgentState;
+use crate::events::AppEvent;
 use crate::layout::{find_in_direction, NavDirection, PaneId};
+use crate::terminal::SubagentEntryState;
 
 use super::super::api_helpers::{
     detect_state_from_api, encode_api_keys, normalize_metadata_source, normalize_metadata_tokens,
@@ -4099,8 +4099,8 @@ mod tests {
     fn pane_report_subagents_rejects_unknown_pane() {
         let (mut app, _pane_id) = app_with_test_workspace();
 
-        let response =
-            app.handle_pane_report_subagents("req".into(), subagents_params("%99".into(), 1, vec![]));
+        let response = app
+            .handle_pane_report_subagents("req".into(), subagents_params("%99".into(), 1, vec![]));
 
         assert_eq!(metadata_error_code(&response), "pane_not_found");
     }
@@ -4226,8 +4226,9 @@ mod tests {
     }
 
     #[test]
-        fn pane_report_subagents_threads_focused_agent_seq_and_session_title() { let (mut app, pane_id) = app_with_test_workspace();
-    
+    fn pane_report_subagents_threads_focused_agent_seq_and_session_title() {
+        let (mut app, pane_id) = app_with_test_workspace();
+
         let mut params = subagents_params(
             pane_id.clone(),
             1,
@@ -4241,13 +4242,14 @@ mod tests {
         );
         params.focused_agent_seq = Some(12);
         params.session_title = Some("fix login bug".into());
-    
+
         let response = app.handle_pane_report_subagents("req".into(), params);
         let success: SuccessResponse = serde_json::from_str(&response).unwrap();
         assert_eq!(success.result, ResponseResult::Ok {});
-    
+
         let pane_id = app.state.workspaces[0].tabs[0].root_pane;
         let report = stored_subagent_report(&app, pane_id).unwrap();
         assert_eq!(report.focused_agent_seq, Some(12));
-        assert_eq!(report.session_title.as_deref(), Some("fix login bug")); }
+        assert_eq!(report.session_title.as_deref(), Some("fix login bug"));
+    }
 }

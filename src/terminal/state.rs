@@ -4112,7 +4112,9 @@ mod tests {
 
         assert!(terminal.set_subagents_report("custom:omp-subagents", 2, vec![], None, None));
 
-        assert!(!terminal.subagent_reports.contains_key("custom:omp-subagents"));
+        assert!(!terminal
+            .subagent_reports
+            .contains_key("custom:omp-subagents"));
         assert!(!terminal.set_subagents_report("custom:omp-subagents", 3, vec![], None, None));
     }
 
@@ -4157,11 +4159,14 @@ mod tests {
         terminal.release_agent("herdr:pi", "pi", None);
 
         assert!(!terminal.subagent_reports.contains_key("herdr:pi"));
-        assert!(terminal.subagent_reports.contains_key("custom:omp-subagents"));
+        assert!(terminal
+            .subagent_reports
+            .contains_key("custom:omp-subagents"));
     }
 
     #[test]
-        fn set_subagents_report_stores_focused_agent_seq_and_session_title() { let mut terminal = test_terminal();
+    fn set_subagents_report_stores_focused_agent_seq_and_session_title() {
+        let mut terminal = test_terminal();
         assert!(terminal.set_subagents_report(
             "custom:omp-subagents",
             1,
@@ -4175,10 +4180,11 @@ mod tests {
             Some(12),
             Some("fix login bug".into()),
         ));
-    
+
         let report = &terminal.subagent_reports["custom:omp-subagents"];
         assert_eq!(report.focused_agent_seq, Some(12));
-        assert_eq!(report.session_title.as_deref(), Some("fix login bug")); }
+        assert_eq!(report.session_title.as_deref(), Some("fix login bug"));
+    }
 
     #[test]
     fn stale_hook_report_sequence_is_ignored_for_same_source() {

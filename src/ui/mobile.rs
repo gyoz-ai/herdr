@@ -1177,6 +1177,8 @@ mod tests {
             is_focused: false,
             is_title_header: false,
             session_title: None,
+            is_collapsed: false,
+            collapsed_count: 0,
         }
     }
 

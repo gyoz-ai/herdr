@@ -4037,15 +4037,17 @@ mod tests {
     }
 
     #[test]
-        fn ghostty_wheel_routing_scrolls_host_scrollback_for_click_tracking_on_main_screen() { let (tx, _rx) = mpsc::channel(4);
+    fn ghostty_wheel_routing_scrolls_host_scrollback_for_click_tracking_on_main_screen() {
+        let (tx, _rx) = mpsc::channel(4);
         let mut terminal = crate::ghostty::Terminal::new(80, 24, 0).unwrap();
         terminal.write(b"\x1b[?1000h\x1b[?1006h");
         let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
-    
+
         assert_eq!(
             pane.wheel_routing(),
             Some(crate::pane::WheelRouting::HostScroll)
-        ); }
+        );
+    }
 
     #[test]
     fn ghostty_mouse_drag_encoding_uses_motion_reporting_state() {
