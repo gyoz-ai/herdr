@@ -26,6 +26,7 @@ pub(crate) struct AgentPanelEntry {
     pub tab_idx: usize,
     pub pane_id: crate::layout::PaneId,
     pub primary_label: String,
+    pub name: Option<String>,
     pub primary_tab_label: Option<String>,
     pub pane_label: Option<String>,
     pub terminal_title: Option<String>,
@@ -200,15 +201,13 @@ fn collect_agent_panel_entries_with_runtimes(
                             ws_idx,
                             tab_idx: detail.tab_idx,
                             pane_id: detail.pane_id,
-                            primary_label: subagent
-                                .description
-                                .clone()
-                                .unwrap_or_else(|| subagent.agent_label.clone()),
+                            primary_label: subagent.description.clone().unwrap_or_default(),
                             primary_tab_label: None,
                             pane_label: None,
                             terminal_title: None,
                             terminal_title_stripped: None,
                             agent_label: Some(subagent.agent_label.clone()),
+                            name: Some(subagent.id.clone()),
                             agent_kind_label: None,
                             agent: None,
                             state: subagent.state,
@@ -241,6 +240,7 @@ fn collect_agent_panel_entries_with_runtimes(
                     terminal_title: detail.terminal_title,
                     terminal_title_stripped: detail.terminal_title_stripped,
                     agent_label: Some(detail.agent_label),
+                    name: None,
                     agent_kind_label: detail.agent_kind_label,
                     agent: detail.agent,
                     state: detail.state,
@@ -279,6 +279,7 @@ fn agent_panel_title_header(
         terminal_title: None,
         terminal_title_stripped: None,
         agent_label: None,
+        name: None,
         agent_kind_label: None,
         agent: None,
         state: AgentState::Unknown,
@@ -2231,10 +2232,12 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
         assert_eq!(entries[0].state, AgentState::Working);
         assert_eq!(entries[0].subagent_seq, Some(0));
         assert_eq!(entries[0].pane_id, first_pane);
-        assert_eq!(entries[1].primary_label, "reviewer");
+        assert_eq!(entries[0].name.as_deref(), Some("a"));
+        assert_eq!(entries[1].primary_label, "");
         assert_eq!(entries[1].agent_label.as_deref(), Some("reviewer"));
         assert_eq!(entries[1].state, AgentState::Idle);
         assert_eq!(entries[1].subagent_seq, Some(1));
+        assert_eq!(entries[1].name.as_deref(), Some("b"));
 
         app.agent_panel_subagents = false;
         let entries = agent_panel_entries(&app);
@@ -2561,7 +2564,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 "custom:omp-subagents",
                 1,
                 vec![SubagentEntryState {
-                    id: "a".into(),
+                    id: "explorer".into(),
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: None,
@@ -2582,7 +2585,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 "custom:omp-subagents",
                 1,
                 vec![SubagentEntryState {
-                    id: "b".into(),
+                    id: "builder".into(),
                     agent_label: "builder".into(),
                     state: AgentState::Idle,
                     description: None,
@@ -2658,21 +2661,21 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 1,
                 vec![
                     SubagentEntryState {
-                        id: "a".into(),
+                        id: "explorer".into(),
                         agent_label: "explorer".into(),
                         state: AgentState::Working,
                         description: None,
                         agent_seq: 1,
                     },
                     SubagentEntryState {
-                        id: "b".into(),
+                        id: "reviewer".into(),
                         agent_label: "reviewer".into(),
                         state: AgentState::Working,
                         description: None,
                         agent_seq: 2,
                     },
                     SubagentEntryState {
-                        id: "c".into(),
+                        id: "builder".into(),
                         agent_label: "builder".into(),
                         state: AgentState::Idle,
                         description: None,
@@ -2784,7 +2787,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 "custom:omp-subagents",
                 1,
                 vec![SubagentEntryState {
-                    id: "a".into(),
+                    id: "explorer".into(),
                     agent_label: "explorer".into(),
                     state: AgentState::Working,
                     description: None,
@@ -2805,7 +2808,7 @@ rows = [[{ token = "git_status", fg = "#123456" }]]
                 "custom:omp-subagents",
                 1,
                 vec![SubagentEntryState {
-                    id: "b".into(),
+                    id: "builder".into(),
                     agent_label: "builder".into(),
                     state: AgentState::Idle,
                     description: None,

@@ -53,9 +53,12 @@ pub(super) fn agent_rows(
                         AgentSidebarToken::StateText => {
                             Some(ResolvedTokenKind::StateText(state_text.to_string()))
                         }
-                        AgentSidebarToken::Workspace => {
-                            Some(ResolvedTokenKind::Workspace(entry.primary_label.clone()))
-                        }
+                        AgentSidebarToken::Workspace => Some(ResolvedTokenKind::Workspace(
+                            entry
+                                .name
+                                .clone()
+                                .unwrap_or_else(|| entry.primary_label.clone()),
+                        )),
                         AgentSidebarToken::Tab => {
                             entry.primary_tab_label.clone().map(ResolvedTokenKind::Tab)
                         }
@@ -63,7 +66,11 @@ pub(super) fn agent_rows(
                             entry.pane_label.clone().map(ResolvedTokenKind::Pane)
                         }
                         AgentSidebarToken::Agent => {
-                            entry.agent_label.clone().map(ResolvedTokenKind::Agent)
+                            if entry.name.is_some() && !entry.primary_label.is_empty() {
+                                Some(ResolvedTokenKind::Agent(entry.primary_label.clone()))
+                            } else {
+                                entry.agent_label.clone().map(ResolvedTokenKind::Agent)
+                            }
                         }
                         AgentSidebarToken::TerminalTitle => entry
                             .terminal_title
@@ -163,6 +170,7 @@ mod tests {
             tab_idx: 0,
             pane_id: crate::layout::PaneId::from_raw(1),
             primary_label: "repo".into(),
+            name: None,
             primary_tab_label: None,
             pane_label: None,
             terminal_title: None,

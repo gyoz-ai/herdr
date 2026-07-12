@@ -679,21 +679,21 @@ mod tests {
                 1,
                 vec![
                     SubagentEntryState {
-                        id: "a".into(),
+                        id: "explorer".into(),
                         agent_label: "explorer".into(),
                         state: AgentState::Working,
                         description: None,
                         agent_seq: 1,
                     },
                     SubagentEntryState {
-                        id: "b".into(),
+                        id: "reviewer".into(),
                         agent_label: "reviewer".into(),
                         state: AgentState::Working,
                         description: None,
                         agent_seq: 2,
                     },
                     SubagentEntryState {
-                        id: "c".into(),
+                        id: "builder".into(),
                         agent_label: "builder".into(),
                         state: AgentState::Idle,
                         description: None,
