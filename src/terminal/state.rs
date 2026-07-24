@@ -1641,6 +1641,16 @@ impl TerminalState {
         if entries.is_empty() {
             return self.subagent_reports.remove(source).is_some();
         }
+        let session_title = session_title.or_else(|| {
+            self.subagent_reports
+                .get(source)
+                .and_then(|existing| existing.session_title.clone())
+        });
+        if focused_agent_seq.is_some() {
+            for report in self.subagent_reports.values_mut() {
+                report.focused_agent_seq = None;
+            }
+        }
         self.subagent_reports.insert(
             source.to_string(),
             SubagentReport {
@@ -4184,6 +4194,148 @@ mod tests {
         let report = &terminal.subagent_reports["custom:omp-subagents"];
         assert_eq!(report.focused_agent_seq, Some(12));
         assert_eq!(report.session_title.as_deref(), Some("fix login bug"));
+    }
+
+    #[test]
+    fn set_subagents_report_preserves_session_title_when_omitted() {
+        let mut terminal = test_terminal();
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                agent_seq: 0,
+            }],
+            None,
+            Some("fix login bug".into()),
+        ));
+
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            2,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Idle,
+                description: None,
+                agent_seq: 0,
+            }],
+            None,
+            None,
+        ));
+
+        let report = &terminal.subagent_reports["custom:omp-subagents"];
+        assert_eq!(report.session_title.as_deref(), Some("fix login bug"));
+    }
+
+    #[test]
+    fn set_subagents_report_updates_session_title_when_provided() {
+        let mut terminal = test_terminal();
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            1,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                agent_seq: 0,
+            }],
+            None,
+            Some("fix login bug".into()),
+        ));
+
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents",
+            2,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Idle,
+                description: None,
+                agent_seq: 0,
+            }],
+            None,
+            Some("ship release notes".into()),
+        ));
+
+        let report = &terminal.subagent_reports["custom:omp-subagents"];
+        assert_eq!(report.session_title.as_deref(), Some("ship release notes"));
+    }
+
+    #[test]
+    fn set_subagents_report_focus_is_exclusive_across_sources() {
+        let mut terminal = test_terminal();
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents-a",
+            1,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                agent_seq: 0,
+            }],
+            Some(0),
+            None,
+        ));
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents-b",
+            1,
+            vec![SubagentEntryState {
+                id: "b".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                agent_seq: 1,
+            }],
+            Some(1),
+            None,
+        ));
+
+        let report_a = &terminal.subagent_reports["custom:omp-subagents-a"];
+        let report_b = &terminal.subagent_reports["custom:omp-subagents-b"];
+        assert_eq!(report_a.focused_agent_seq, None);
+        assert_eq!(report_b.focused_agent_seq, Some(1));
+    }
+
+    #[test]
+    fn set_subagents_report_without_focus_does_not_clear_existing_focus() {
+        let mut terminal = test_terminal();
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents-a",
+            1,
+            vec![SubagentEntryState {
+                id: "a".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                agent_seq: 0,
+            }],
+            Some(0),
+            None,
+        ));
+        assert!(terminal.set_subagents_report(
+            "custom:omp-subagents-b",
+            1,
+            vec![SubagentEntryState {
+                id: "b".into(),
+                agent_label: "task".into(),
+                state: AgentState::Working,
+                description: None,
+                agent_seq: 1,
+            }],
+            None,
+            None,
+        ));
+
+        let report_a = &terminal.subagent_reports["custom:omp-subagents-a"];
+        let report_b = &terminal.subagent_reports["custom:omp-subagents-b"];
+        assert_eq!(report_a.focused_agent_seq, Some(0));
+        assert_eq!(report_b.focused_agent_seq, None);
     }
 
     #[test]
