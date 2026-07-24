@@ -167,6 +167,7 @@ pub(crate) struct GhosttyPaneCore {
     decscusr_tracker: DecscusrTracker,
     cursor_settle_state: CursorPositionSettleState,
     windows_powershell_prompt_cwd_reporting: bool,
+    had_mouse_tracking: bool,
 }
 
 pub(crate) struct PaneTerminal {
@@ -357,6 +358,10 @@ impl PaneTerminal {
 
     pub fn input_state(&self) -> Option<InputState> {
         self.ghostty.input_state()
+    }
+
+    pub fn had_mouse_tracking(&self) -> bool {
+        self.ghostty.had_mouse_tracking()
     }
 
     pub fn wheel_routing(&self) -> Option<crate::pane::WheelRouting> {
@@ -920,6 +925,7 @@ impl GhosttyPaneTerminal {
                 decscusr_tracker: DecscusrTracker::default(),
                 cursor_settle_state: CursorPositionSettleState::default(),
                 windows_powershell_prompt_cwd_reporting: false,
+                had_mouse_tracking: false,
             }),
             key_encoder: Mutex::new(key_encoder),
             pending_pty_responses,
@@ -1130,6 +1136,18 @@ impl GhosttyPaneTerminal {
             xtgettcap_responses,
             &mut terminal_responses,
         );
+        if !core.had_mouse_tracking
+            && [
+                MODE_MOUSE_X10,
+                MODE_MOUSE_PRESS_RELEASE,
+                MODE_MOUSE_BUTTON_MOTION,
+                MODE_MOUSE_ANY_MOTION,
+            ]
+            .iter()
+            .any(|&mode| core.terminal.mode_get(mode).unwrap_or(false))
+        {
+            core.had_mouse_tracking = true;
+        }
         let clipboard_writes = core.terminal.take_clipboard_writes();
         let reported_cwd = core
             .terminal
@@ -1493,6 +1511,13 @@ impl GhosttyPaneTerminal {
     pub fn kitty_keyboard_state_ansi(&self) -> Option<String> {
         let core = self.core.lock().ok()?;
         core.kitty_keyboard.replay_ansi()
+    }
+
+    pub fn had_mouse_tracking(&self) -> bool {
+        self.core
+            .lock()
+            .map(|core| core.had_mouse_tracking)
+            .unwrap_or(false)
     }
 
     pub fn input_state(&self) -> Option<InputState> {

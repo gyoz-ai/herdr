@@ -2504,6 +2504,10 @@ impl PaneRuntime {
         self.terminal.input_state()
     }
 
+    pub fn had_mouse_tracking(&self) -> bool {
+        self.terminal.had_mouse_tracking()
+    }
+
     pub fn cursor_state(&self, area: Rect, show_cursor: bool) -> Option<TerminalCursorState> {
         if !show_cursor {
             return None;

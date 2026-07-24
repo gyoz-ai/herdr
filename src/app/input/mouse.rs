@@ -647,7 +647,14 @@ impl AppState {
                             )
                         });
 
-                    if click_only_tracking {
+                    let had_mouse_tracking = self
+                        .active
+                        .and_then(|ws_idx| {
+                            self.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id)
+                        })
+                        .is_some_and(|rt| rt.had_mouse_tracking());
+
+                    if click_only_tracking || had_mouse_tracking {
                         self.pending_pane_click = Some(PendingPaneClickState {
                             pane_id: info.id,
                             start_col: mouse.column,
@@ -2243,6 +2250,97 @@ mod tests {
             input_rx.try_recv().expect("forwarded left mouse up"),
             Bytes::from_static(b"\x1b[<0;3;4m")
         );
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn sticky_mouse_history_pane_defers_click_instead_of_anchoring_selection() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"",
+                4,
+            );
+        runtime.test_process_pty_bytes(b"\x1b[?1000h\x1b[?1006h");
+        runtime.test_process_pty_bytes(b"\x1b[?1000l");
+        assert!(runtime.had_mouse_tracking());
+        assert_eq!(
+            runtime.input_state().map(|state| state.mouse_protocol_mode),
+            Some(MouseProtocolMode::None)
+        );
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(app.state.pending_pane_click.is_some());
+        assert!(app.state.selection.is_none());
+        assert!(input_rx.try_recv().is_err());
+
+        app.state.workspaces[0]
+            .test_runtimes
+            .get(&pane_id)
+            .expect("test runtime")
+            .test_process_pty_bytes(b"\x1b[?1000h");
+
+        app.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left), col, row));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app.state.selection.is_none());
+        assert_eq!(
+            input_rx.try_recv().expect("forwarded left mouse down"),
+            Bytes::from_static(b"\x1b[<0;3;4M")
+        );
+        assert_eq!(
+            input_rx.try_recv().expect("forwarded left mouse up"),
+            Bytes::from_static(b"\x1b[<0;3;4m")
+        );
+        assert!(input_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn never_mouse_pane_anchors_selection_on_left_click() {
+        let mut app = app_for_mouse_test();
+        let mut ws = Workspace::test_new("test");
+        let pane_id = ws.tabs[0].root_pane;
+        let pane_infos = ws.tabs[0].layout.panes(Rect::new(26, 2, 80, 18));
+        let info = pane_infos[0].clone();
+        let (runtime, mut input_rx) =
+            crate::terminal::TerminalRuntime::test_with_channel_and_scrollback_bytes(
+                info.inner_rect.width,
+                info.inner_rect.height,
+                0,
+                b"",
+                4,
+            );
+        assert!(!runtime.had_mouse_tracking());
+        ws.insert_test_runtime(pane_id, runtime);
+
+        app.state.workspaces = vec![ws];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        app.state.mode = Mode::Terminal;
+        app.state.view.pane_infos = pane_infos;
+
+        let col = info.inner_rect.x + 2;
+        let row = info.inner_rect.y + 3;
+
+        app.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left), col, row));
+        assert!(app.state.pending_pane_click.is_none());
+        assert!(app.state.selection.is_some());
         assert!(input_rx.try_recv().is_err());
     }
 

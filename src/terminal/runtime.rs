@@ -294,6 +294,10 @@ impl TerminalRuntime {
         self.0.input_state()
     }
 
+    pub fn had_mouse_tracking(&self) -> bool {
+        self.0.had_mouse_tracking()
+    }
+
     pub fn cursor_state(
         &self,
         area: Rect,
